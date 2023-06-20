@@ -1,10 +1,11 @@
-import * as InvokeAI from 'app/invokeai';
+import * as InvokeAI from 'app/types/invokeai';
 import { IRect, Vector2d } from 'konva/lib/types';
 import { RgbaColor } from 'react-colorful';
+import { ImageDTO } from 'services/api';
 
 export const LAYER_NAMES_DICT = [
-  { key: 'Base', value: 'base' },
-  { key: 'Mask', value: 'mask' },
+  { label: 'Base', value: 'base' },
+  { label: 'Mask', value: 'mask' },
 ];
 
 export const LAYER_NAMES = ['base', 'mask'] as const;
@@ -12,9 +13,9 @@ export const LAYER_NAMES = ['base', 'mask'] as const;
 export type CanvasLayer = (typeof LAYER_NAMES)[number];
 
 export const BOUNDING_BOX_SCALES_DICT = [
-  { key: 'Auto', value: 'auto' },
-  { key: 'Manual', value: 'manual' },
-  { key: 'None', value: 'none' },
+  { label: 'Auto', value: 'auto' },
+  { label: 'Manual', value: 'manual' },
+  { label: 'None', value: 'none' },
 ];
 
 export const BOUNDING_BOX_SCALES = ['none', 'auto', 'manual'] as const;
@@ -37,7 +38,7 @@ export type CanvasImage = {
   y: number;
   width: number;
   height: number;
-  image: InvokeAI.Image;
+  image: ImageDTO;
 };
 
 export type CanvasMaskLine = {
@@ -90,7 +91,14 @@ export type CanvasLayerState = {
   stagingArea: {
     images: CanvasImage[];
     selectedImageIndex: number;
+    sessionId?: string;
+    boundingBox?: IRect;
   };
+};
+
+export type CanvasSession = {
+  sessionId: string;
+  boundingBox: IRect;
 };
 
 // type guards
@@ -142,6 +150,7 @@ export interface CanvasState {
   minimumStageScale: number;
   pastLayerStates: CanvasLayerState[];
   scaledBoundingBoxDimensions: Dimensions;
+  shouldAntialias: boolean;
   shouldAutoSave: boolean;
   shouldCropToBoundingBoxOnSave: boolean;
   shouldDarkenOutsideBoundingBox: boolean;

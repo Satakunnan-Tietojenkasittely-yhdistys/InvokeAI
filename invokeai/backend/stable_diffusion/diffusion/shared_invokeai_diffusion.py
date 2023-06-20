@@ -1,14 +1,16 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
 from math import ceil
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union, List
 
 import numpy as np
 import torch
-from diffusers.models.cross_attention import AttnProcessor
+from diffusers import UNet2DConditionModel
+from diffusers.models.attention_processor import AttentionProcessor
 from typing_extensions import TypeAlias
 
-from invokeai.backend.globals import Globals
+import invokeai.backend.util.logging as logger
+from invokeai.app.services.config import InvokeAIAppConfig
 
 from .cross_attention_control import (
     Arguments,
@@ -16,8 +18,7 @@ from .cross_attention_control import (
     CrossAttentionType,
     SwapCrossAttnContext,
     get_cross_attention_modules,
-    override_cross_attention,
-    restore_default_cross_attention,
+    setup_cross_attention_control_attention_processors,
 )
 from .cross_attention_map_saving import AttentionMapSaver
 
@@ -29,7 +30,6 @@ ModelForwardCallback: TypeAlias = Union[
     ],
     Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor],
 ]
-
 
 @dataclass(frozen=True)
 class PostprocessingSettings:
@@ -65,68 +65,49 @@ class InvokeAIDiffuserComponent:
         self,
         model,
         model_forward_callback: ModelForwardCallback,
-        is_running_diffusers: bool = False,
     ):
         """
         :param model: the unet model to pass through to cross attention control
         :param model_forward_callback: a lambda with arguments (x, sigma, conditioning_to_apply). will be called repeatedly. most likely, this should simply call model.forward(x, sigma, conditioning)
         """
+        config = InvokeAIAppConfig.get_config()
         self.conditioning = None
         self.model = model
-        self.is_running_diffusers = is_running_diffusers
         self.model_forward_callback = model_forward_callback
         self.cross_attention_control_context = None
-        self.sequential_guidance = Globals.sequential_guidance
+        self.sequential_guidance = config.sequential_guidance
 
+    @classmethod
     @contextmanager
     def custom_attention_context(
-        self, extra_conditioning_info: Optional[ExtraConditioningInfo], step_count: int
+        cls,
+        unet: UNet2DConditionModel, # note: also may futz with the text encoder depending on requested LoRAs
+        extra_conditioning_info: Optional[ExtraConditioningInfo],
+        step_count: int
     ):
-        do_swap = (
-            extra_conditioning_info is not None
-            and extra_conditioning_info.wants_cross_attention_control
-        )
-        old_attn_processor = None
-        if do_swap:
-            old_attn_processor = self.override_cross_attention(
-                extra_conditioning_info, step_count=step_count
-            )
+        old_attn_processors = None
+        if extra_conditioning_info and (
+            extra_conditioning_info.wants_cross_attention_control
+        ):
+            old_attn_processors = unet.attn_processors
+            # Load lora conditions into the model
+            if extra_conditioning_info.wants_cross_attention_control:
+                cross_attention_control_context = Context(
+                    arguments=extra_conditioning_info.cross_attention_control_args,
+                    step_count=step_count,
+                )
+                setup_cross_attention_control_attention_processors(
+                    unet,
+                    cross_attention_control_context,
+                )
+
         try:
             yield None
         finally:
-            if old_attn_processor is not None:
-                self.restore_default_cross_attention(old_attn_processor)
+            if old_attn_processors is not None:
+                unet.set_attn_processor(old_attn_processors)
             # TODO resuscitate attention map saving
             # self.remove_attention_map_saving()
-
-    def override_cross_attention(
-        self, conditioning: ExtraConditioningInfo, step_count: int
-    ) -> Dict[str, AttnProcessor]:
-        """
-        setup cross attention .swap control. for diffusers this replaces the attention processor, so
-        the previous attention processor is returned so that the caller can restore it later.
-        """
-        self.conditioning = conditioning
-        self.cross_attention_control_context = Context(
-            arguments=self.conditioning.cross_attention_control_args,
-            step_count=step_count,
-        )
-        return override_cross_attention(
-            self.model,
-            self.cross_attention_control_context,
-            is_running_diffusers=self.is_running_diffusers,
-        )
-
-    def restore_default_cross_attention(
-        self, restore_attention_processor: Optional["AttnProcessor"] = None
-    ):
-        self.conditioning = None
-        self.cross_attention_control_context = None
-        restore_default_cross_attention(
-            self.model,
-            is_running_diffusers=self.is_running_diffusers,
-            restore_attention_processor=restore_attention_processor,
-        )
 
     def setup_attention_map_saving(self, saver: AttentionMapSaver):
         def callback(slice, dim, offset, slice_size, key):
@@ -165,9 +146,11 @@ class InvokeAIDiffuserComponent:
         sigma: torch.Tensor,
         unconditioning: Union[torch.Tensor, dict],
         conditioning: Union[torch.Tensor, dict],
-        unconditional_guidance_scale: float,
+        # unconditional_guidance_scale: float,
+        unconditional_guidance_scale: Union[float, List[float]],
         step_index: Optional[int] = None,
         total_step_count: Optional[int] = None,
+        **kwargs,
     ):
         """
         :param x: current latents
@@ -179,12 +162,15 @@ class InvokeAIDiffuserComponent:
         :return: the new latents after applying the model to x using unscaled unconditioning and CFG-scaled conditioning.
         """
 
+        if isinstance(unconditional_guidance_scale, list):
+            guidance_scale = unconditional_guidance_scale[step_index]
+        else:
+            guidance_scale = unconditional_guidance_scale
+
         cross_attention_control_types_to_do = []
         context: Context = self.cross_attention_control_context
         if self.cross_attention_control_context is not None:
-            percent_through = self.calculate_percent_through(
-                sigma, step_index, total_step_count
-            )
+            percent_through = step_index / total_step_count
             cross_attention_control_types_to_do = (
                 context.get_active_cross_attention_control_types_for_step(
                     percent_through
@@ -196,7 +182,7 @@ class InvokeAIDiffuserComponent:
 
         if wants_hybrid_conditioning:
             unconditioned_next_x, conditioned_next_x = self._apply_hybrid_conditioning(
-                x, sigma, unconditioning, conditioning
+                x, sigma, unconditioning, conditioning, **kwargs,
             )
         elif wants_cross_attention_control:
             (
@@ -208,13 +194,14 @@ class InvokeAIDiffuserComponent:
                 unconditioning,
                 conditioning,
                 cross_attention_control_types_to_do,
+                **kwargs,
             )
         elif self.sequential_guidance:
             (
                 unconditioned_next_x,
                 conditioned_next_x,
             ) = self._apply_standard_conditioning_sequentially(
-                x, sigma, unconditioning, conditioning
+                x, sigma, unconditioning, conditioning, **kwargs,
             )
 
         else:
@@ -222,11 +209,12 @@ class InvokeAIDiffuserComponent:
                 unconditioned_next_x,
                 conditioned_next_x,
             ) = self._apply_standard_conditioning(
-                x, sigma, unconditioning, conditioning
+                x, sigma, unconditioning, conditioning, **kwargs,
             )
 
         combined_next_x = self._combine(
-            unconditioned_next_x, conditioned_next_x, unconditional_guidance_scale
+            # unconditioned_next_x, conditioned_next_x, unconditional_guidance_scale
+            unconditioned_next_x, conditioned_next_x, guidance_scale
         )
 
         return combined_next_x
@@ -240,9 +228,7 @@ class InvokeAIDiffuserComponent:
         total_step_count,
     ) -> torch.Tensor:
         if postprocessing_settings is not None:
-            percent_through = self.calculate_percent_through(
-                sigma, step_index, total_step_count
-            )
+            percent_through = step_index / total_step_count
             latents = self.apply_threshold(
                 postprocessing_settings, latents, percent_through
             )
@@ -251,31 +237,15 @@ class InvokeAIDiffuserComponent:
             )
         return latents
 
-    def calculate_percent_through(self, sigma, step_index, total_step_count):
-        if step_index is not None and total_step_count is not None:
-            # 🧨diffusers codepath
-            percent_through = (
-                step_index / total_step_count
-            )  # will never reach 1.0 - this is deliberate
-        else:
-            # legacy compvis codepath
-            # TODO remove when compvis codepath support is dropped
-            if step_index is None and sigma is None:
-                raise ValueError(
-                    f"Either step_index or sigma is required when doing cross attention control, but both are None."
-                )
-            percent_through = self.estimate_percent_through(step_index, sigma)
-        return percent_through
-
     # methods below are called from do_diffusion_step and should be considered private to this class.
 
-    def _apply_standard_conditioning(self, x, sigma, unconditioning, conditioning):
+    def _apply_standard_conditioning(self, x, sigma, unconditioning, conditioning, **kwargs):
         # fast batched path
         x_twice = torch.cat([x] * 2)
         sigma_twice = torch.cat([sigma] * 2)
         both_conditionings = torch.cat([unconditioning, conditioning])
         both_results = self.model_forward_callback(
-            x_twice, sigma_twice, both_conditionings
+            x_twice, sigma_twice, both_conditionings, **kwargs,
         )
         unconditioned_next_x, conditioned_next_x = both_results.chunk(2)
         if conditioned_next_x.device.type == "mps":
@@ -289,16 +259,18 @@ class InvokeAIDiffuserComponent:
         sigma,
         unconditioning: torch.Tensor,
         conditioning: torch.Tensor,
+        **kwargs,
     ):
         # low-memory sequential path
-        unconditioned_next_x = self.model_forward_callback(x, sigma, unconditioning)
-        conditioned_next_x = self.model_forward_callback(x, sigma, conditioning)
+        unconditioned_next_x = self.model_forward_callback(x, sigma, unconditioning, **kwargs)
+        conditioned_next_x = self.model_forward_callback(x, sigma, conditioning, **kwargs)
         if conditioned_next_x.device.type == "mps":
             # prevent a result filled with zeros. seems to be a torch bug.
             conditioned_next_x = conditioned_next_x.clone()
         return unconditioned_next_x, conditioned_next_x
 
-    def _apply_hybrid_conditioning(self, x, sigma, unconditioning, conditioning):
+    # TODO: looks unused
+    def _apply_hybrid_conditioning(self, x, sigma, unconditioning, conditioning, **kwargs):
         assert isinstance(conditioning, dict)
         assert isinstance(unconditioning, dict)
         x_twice = torch.cat([x] * 2)
@@ -313,7 +285,7 @@ class InvokeAIDiffuserComponent:
             else:
                 both_conditionings[k] = torch.cat([unconditioning[k], conditioning[k]])
         unconditioned_next_x, conditioned_next_x = self.model_forward_callback(
-            x_twice, sigma_twice, both_conditionings
+            x_twice, sigma_twice, both_conditionings, **kwargs,
         ).chunk(2)
         return unconditioned_next_x, conditioned_next_x
 
@@ -324,31 +296,7 @@ class InvokeAIDiffuserComponent:
         unconditioning,
         conditioning,
         cross_attention_control_types_to_do,
-    ):
-        if self.is_running_diffusers:
-            return self._apply_cross_attention_controlled_conditioning__diffusers(
-                x,
-                sigma,
-                unconditioning,
-                conditioning,
-                cross_attention_control_types_to_do,
-            )
-        else:
-            return self._apply_cross_attention_controlled_conditioning__compvis(
-                x,
-                sigma,
-                unconditioning,
-                conditioning,
-                cross_attention_control_types_to_do,
-            )
-
-    def _apply_cross_attention_controlled_conditioning__diffusers(
-        self,
-        x: torch.Tensor,
-        sigma,
-        unconditioning,
-        conditioning,
-        cross_attention_control_types_to_do,
+        **kwargs,
     ):
         context: Context = self.cross_attention_control_context
 
@@ -364,6 +312,7 @@ class InvokeAIDiffuserComponent:
             sigma,
             unconditioning,
             {"swap_cross_attn_context": cross_attn_processor_context},
+            **kwargs,
         )
 
         # do requested cross attention types for conditioning (positive prompt)
@@ -375,54 +324,8 @@ class InvokeAIDiffuserComponent:
             sigma,
             conditioning,
             {"swap_cross_attn_context": cross_attn_processor_context},
+            **kwargs,
         )
-        return unconditioned_next_x, conditioned_next_x
-
-    def _apply_cross_attention_controlled_conditioning__compvis(
-        self,
-        x: torch.Tensor,
-        sigma,
-        unconditioning,
-        conditioning,
-        cross_attention_control_types_to_do,
-    ):
-        # print('pct', percent_through, ': doing cross attention control on', cross_attention_control_types_to_do)
-        # slower non-batched path (20% slower on mac MPS)
-        # We are only interested in using attention maps for conditioned_next_x, but batching them with generation of
-        # unconditioned_next_x causes attention maps to *also* be saved for the unconditioned_next_x.
-        # This messes app their application later, due to mismatched shape of dim 0 (seems to be 16 for batched vs. 8)
-        # (For the batched invocation the `wrangler` function gets attention tensor with shape[0]=16,
-        # representing batched uncond + cond, but then when it comes to applying the saved attention, the
-        # wrangler gets an attention tensor which only has shape[0]=8, representing just self.edited_conditionings.)
-        # todo: give CrossAttentionControl's `wrangler` function more info so it can work with a batched call as well.
-        context: Context = self.cross_attention_control_context
-
-        try:
-            unconditioned_next_x = self.model_forward_callback(x, sigma, unconditioning)
-
-            # process x using the original prompt, saving the attention maps
-            # print("saving attention maps for", cross_attention_control_types_to_do)
-            for ca_type in cross_attention_control_types_to_do:
-                context.request_save_attention_maps(ca_type)
-            _ = self.model_forward_callback(x, sigma, conditioning)
-            context.clear_requests(cleanup=False)
-
-            # process x again, using the saved attention maps to control where self.edited_conditioning will be applied
-            # print("applying saved attention maps for", cross_attention_control_types_to_do)
-            for ca_type in cross_attention_control_types_to_do:
-                context.request_apply_saved_attention_maps(ca_type)
-            edited_conditioning = (
-                self.conditioning.cross_attention_control_args.edited_conditioning
-            )
-            conditioned_next_x = self.model_forward_callback(
-                x, sigma, edited_conditioning
-            )
-            context.clear_requests(cleanup=True)
-
-        except:
-            context.clear_requests(cleanup=True)
-            raise
-
         return unconditioned_next_x, conditioned_next_x
 
     def _combine(self, unconditioned_next_x, conditioned_next_x, guidance_scale):
@@ -466,10 +369,14 @@ class InvokeAIDiffuserComponent:
             outside = torch.count_nonzero(
                 (latents < -current_threshold) | (latents > current_threshold)
             )
-            print(
-                f"\nThreshold: %={percent_through} threshold={current_threshold:.3f} (of {threshold:.3f})\n"
-                f"  | min, mean, max = {minval:.3f}, {mean:.3f}, {maxval:.3f}\tstd={std}\n"
-                f"  | {outside / latents.numel() * 100:.2f}% values outside threshold"
+            logger.info(
+                f"Threshold: %={percent_through} threshold={current_threshold:.3f} (of {threshold:.3f})"
+                )
+            logger.debug(
+                f"min, mean, max = {minval:.3f}, {mean:.3f}, {maxval:.3f}\tstd={std}"
+            )
+            logger.debug(
+                f"{outside / latents.numel() * 100:.2f}% values outside threshold"
             )
 
         if maxval < current_threshold and minval > -current_threshold:
@@ -496,9 +403,11 @@ class InvokeAIDiffuserComponent:
             )
 
         if self.debug_thresholding:
-            print(
-                f"  | min,     , max = {minval:.3f},        , {maxval:.3f}\t(scaled by {scale})\n"
-                f"  | {num_altered / latents.numel() * 100:.2f}% values altered"
+            logger.debug(
+                f"min,     , max = {minval:.3f},        , {maxval:.3f}\t(scaled by {scale})"
+            )
+            logger.debug(
+                f"{num_altered / latents.numel() * 100:.2f}% values altered"
             )
 
         return latents
@@ -599,7 +508,6 @@ class InvokeAIDiffuserComponent:
         )
 
         # below is fugly omg
-        num_actual_conditionings = len(c_or_weighted_c_list)
         conditionings = [uc] + [c for c, weight in weighted_cond_list]
         weights = [1] + [weight for c, weight in weighted_cond_list]
         chunk_count = ceil(len(conditionings) / 2)

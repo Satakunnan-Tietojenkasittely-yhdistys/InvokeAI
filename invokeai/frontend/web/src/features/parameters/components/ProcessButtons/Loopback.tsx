@@ -1,5 +1,5 @@
 import { createSelector } from '@reduxjs/toolkit';
-import { useAppDispatch, useAppSelector } from 'app/storeHooks';
+import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
 import IAIIconButton from 'common/components/IAIIconButton';
 import { postprocessingSelector } from 'features/parameters/store/postprocessingSelectors';
 import { setShouldLoopback } from 'features/parameters/store/postprocessingSlice';
@@ -21,8 +21,6 @@ const LoopbackButton = () => {
     <IAIIconButton
       aria-label={t('parameters.toggleLoopback')}
       tooltip={t('parameters.toggleLoopback')}
-      styleClass="loopback-btn"
-      asCheckbox={true}
       isChecked={shouldLoopback}
       icon={<FaRecycle />}
       onClick={() => {

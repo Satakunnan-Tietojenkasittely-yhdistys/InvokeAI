@@ -1,5 +1,5 @@
 import {
-  Button,
+  ChakraProps,
   Flex,
   Heading,
   Modal,
@@ -13,56 +13,69 @@ import {
   useDisclosure,
 } from '@chakra-ui/react';
 import { createSelector } from '@reduxjs/toolkit';
-import { IN_PROGRESS_IMAGE_TYPES } from 'app/constants';
-import { RootState } from 'app/store';
-import { useAppDispatch, useAppSelector } from 'app/storeHooks';
-import IAINumberInput from 'common/components/IAINumberInput';
-import IAISelect from 'common/components/IAISelect';
+import { VALID_LOG_LEVELS } from 'app/logging/useLogger';
+import { LOCALSTORAGE_KEYS, LOCALSTORAGE_PREFIX } from 'app/store/constants';
+import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
+import IAIButton from 'common/components/IAIButton';
+import IAIMantineSelect from 'common/components/IAIMantineSelect';
 import IAISwitch from 'common/components/IAISwitch';
 import { systemSelector } from 'features/system/store/systemSelectors';
 import {
-  InProgressImageType,
+  SystemState,
+  consoleLogLevelChanged,
   setEnableImageDebugging,
-  setSaveIntermediatesInterval,
   setShouldConfirmOnDelete,
   setShouldDisplayGuides,
-  setShouldDisplayInProgressType,
-  SystemState,
+  shouldAntialiasProgressImageChanged,
+  shouldLogToConsoleChanged,
 } from 'features/system/store/systemSlice';
 import { uiSelector } from 'features/ui/store/uiSelectors';
 import {
+  setShouldShowProgressInViewer,
   setShouldUseCanvasBetaLayout,
   setShouldUseSliders,
 } from 'features/ui/store/uiSlice';
 import { UIState } from 'features/ui/store/uiTypes';
-import { isEqual, map } from 'lodash';
-import { persistor } from 'persistor';
-import { ChangeEvent, cloneElement, ReactElement } from 'react';
+import { isEqual } from 'lodash-es';
+import {
+  ChangeEvent,
+  ReactElement,
+  cloneElement,
+  useCallback,
+  useEffect,
+} from 'react';
 import { useTranslation } from 'react-i18next';
+import { LogLevelName } from 'roarr';
+import SettingsSchedulers from './SettingsSchedulers';
 
 const selector = createSelector(
   [systemSelector, uiSelector],
   (system: SystemState, ui: UIState) => {
     const {
-      shouldDisplayInProgressType,
       shouldConfirmOnDelete,
       shouldDisplayGuides,
-      model_list,
-      saveIntermediatesInterval,
       enableImageDebugging,
+      consoleLogLevel,
+      shouldLogToConsole,
+      shouldAntialiasProgressImage,
     } = system;
 
-    const { shouldUseCanvasBetaLayout, shouldUseSliders } = ui;
+    const {
+      shouldUseCanvasBetaLayout,
+      shouldUseSliders,
+      shouldShowProgressInViewer,
+    } = ui;
 
     return {
-      shouldDisplayInProgressType,
       shouldConfirmOnDelete,
       shouldDisplayGuides,
-      models: map(model_list, (_model, key) => key),
-      saveIntermediatesInterval,
       enableImageDebugging,
       shouldUseCanvasBetaLayout,
       shouldUseSliders,
+      shouldShowProgressInViewer,
+      consoleLogLevel,
+      shouldLogToConsole,
+      shouldAntialiasProgressImage,
     };
   },
   {
@@ -70,22 +83,40 @@ const selector = createSelector(
   }
 );
 
+const modalSectionStyles: ChakraProps['sx'] = {
+  flexDirection: 'column',
+  gap: 2,
+  p: 4,
+  bg: 'base.900',
+  borderRadius: 'base',
+};
+
+type ConfigOptions = {
+  shouldShowDeveloperSettings: boolean;
+  shouldShowResetWebUiText: boolean;
+  shouldShowBetaLayout: boolean;
+};
+
 type SettingsModalProps = {
   /* The button to open the Settings Modal */
   children: ReactElement;
+  config?: ConfigOptions;
 };
 
-/**
- * Modal for app settings. Also provides Reset functionality in which the
- * app's localstorage is wiped via redux-persist.
- *
- * Secondary post-reset modal is included here.
- */
-const SettingsModal = ({ children }: SettingsModalProps) => {
+const SettingsModal = ({ children, config }: SettingsModalProps) => {
   const dispatch = useAppDispatch();
   const { t } = useTranslation();
 
-  const steps = useAppSelector((state: RootState) => state.generation.steps);
+  const shouldShowBetaLayout = config?.shouldShowBetaLayout ?? true;
+  const shouldShowDeveloperSettings =
+    config?.shouldShowDeveloperSettings ?? true;
+  const shouldShowResetWebUiText = config?.shouldShowResetWebUiText ?? true;
+
+  useEffect(() => {
+    if (!shouldShowDeveloperSettings) {
+      dispatch(shouldLogToConsoleChanged(false));
+    }
+  }, [shouldShowDeveloperSettings, dispatch]);
 
   const {
     isOpen: isSettingsModalOpen,
@@ -100,31 +131,44 @@ const SettingsModal = ({ children }: SettingsModalProps) => {
   } = useDisclosure();
 
   const {
-    shouldDisplayInProgressType,
     shouldConfirmOnDelete,
     shouldDisplayGuides,
-    saveIntermediatesInterval,
     enableImageDebugging,
     shouldUseCanvasBetaLayout,
     shouldUseSliders,
+    shouldShowProgressInViewer,
+    consoleLogLevel,
+    shouldLogToConsole,
+    shouldAntialiasProgressImage,
   } = useAppSelector(selector);
 
-  /**
-   * Resets localstorage, then opens a secondary modal informing user to
-   * refresh their browser.
-   * */
-  const handleClickResetWebUI = () => {
-    persistor.purge().then(() => {
-      onSettingsModalClose();
-      onRefreshModalOpen();
+  const handleClickResetWebUI = useCallback(() => {
+    // Only remove our keys
+    Object.keys(window.localStorage).forEach((key) => {
+      if (
+        LOCALSTORAGE_KEYS.includes(key) ||
+        key.startsWith(LOCALSTORAGE_PREFIX)
+      ) {
+        localStorage.removeItem(key);
+      }
     });
-  };
+    onSettingsModalClose();
+    onRefreshModalOpen();
+  }, [onSettingsModalClose, onRefreshModalOpen]);
 
-  const handleChangeIntermediateSteps = (value: number) => {
-    if (value > steps) value = steps;
-    if (value < 1) value = 1;
-    dispatch(setSaveIntermediatesInterval(value));
-  };
+  const handleLogLevelChanged = useCallback(
+    (v: string) => {
+      dispatch(consoleLogLevelChanged(v as LogLevelName));
+    },
+    [dispatch]
+  );
+
+  const handleLogToConsoleChanged = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      dispatch(shouldLogToConsoleChanged(e.target.checked));
+    },
+    [dispatch]
+  );
 
   return (
     <>
@@ -135,105 +179,118 @@ const SettingsModal = ({ children }: SettingsModalProps) => {
       <Modal
         isOpen={isSettingsModalOpen}
         onClose={onSettingsModalClose}
-        size="lg"
+        size="xl"
+        isCentered
       >
         <ModalOverlay />
-        <ModalContent className="modal settings-modal">
-          <ModalHeader className="settings-modal-header">
-            {t('common.settingsLabel')}
-          </ModalHeader>
-          <ModalCloseButton className="modal-close-btn" />
-          <ModalBody className="settings-modal-content">
-            <div className="settings-modal-items">
-              <div
-                className="settings-modal-item"
-                style={{ gridAutoFlow: 'row', rowGap: '0.5rem' }}
-              >
-                <IAISelect
-                  label={t('settings.displayInProgress')}
-                  validValues={IN_PROGRESS_IMAGE_TYPES}
-                  value={shouldDisplayInProgressType}
-                  onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+        <ModalContent paddingInlineEnd={4}>
+          <ModalHeader>{t('common.settingsLabel')}</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Flex sx={{ gap: 4, flexDirection: 'column' }}>
+              <Flex sx={modalSectionStyles}>
+                <Heading size="sm">{t('settings.general')}</Heading>
+                <IAISwitch
+                  label={t('settings.confirmOnDelete')}
+                  isChecked={shouldConfirmOnDelete}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                    dispatch(setShouldConfirmOnDelete(e.target.checked))
+                  }
+                />
+              </Flex>
+
+              <Flex sx={modalSectionStyles}>
+                <Heading size="sm">{t('settings.generation')}</Heading>
+                <SettingsSchedulers />
+              </Flex>
+
+              <Flex sx={modalSectionStyles}>
+                <Heading size="sm">{t('settings.ui')}</Heading>
+                <IAISwitch
+                  label={t('settings.displayHelpIcons')}
+                  isChecked={shouldDisplayGuides}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                    dispatch(setShouldDisplayGuides(e.target.checked))
+                  }
+                />
+                {shouldShowBetaLayout && (
+                  <IAISwitch
+                    label={t('settings.useCanvasBeta')}
+                    isChecked={shouldUseCanvasBetaLayout}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                      dispatch(setShouldUseCanvasBetaLayout(e.target.checked))
+                    }
+                  />
+                )}
+                <IAISwitch
+                  label={t('settings.useSlidersForAll')}
+                  isChecked={shouldUseSliders}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                    dispatch(setShouldUseSliders(e.target.checked))
+                  }
+                />
+                <IAISwitch
+                  label={t('settings.showProgressInViewer')}
+                  isChecked={shouldShowProgressInViewer}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                    dispatch(setShouldShowProgressInViewer(e.target.checked))
+                  }
+                />
+                <IAISwitch
+                  label={t('settings.antialiasProgressImages')}
+                  isChecked={shouldAntialiasProgressImage}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
                     dispatch(
-                      setShouldDisplayInProgressType(
-                        e.target.value as InProgressImageType
-                      )
+                      shouldAntialiasProgressImageChanged(e.target.checked)
                     )
                   }
                 />
-                {shouldDisplayInProgressType === 'full-res' && (
-                  <IAINumberInput
-                    label={t('settings.saveSteps')}
-                    min={1}
-                    max={steps}
-                    step={1}
-                    onChange={handleChangeIntermediateSteps}
-                    value={saveIntermediatesInterval}
-                    width="auto"
-                    textAlign="center"
+              </Flex>
+
+              {shouldShowDeveloperSettings && (
+                <Flex sx={modalSectionStyles}>
+                  <Heading size="sm">{t('settings.developer')}</Heading>
+                  <IAISwitch
+                    label={t('settings.shouldLogToConsole')}
+                    isChecked={shouldLogToConsole}
+                    onChange={handleLogToConsoleChanged}
                   />
+                  <IAIMantineSelect
+                    disabled={!shouldLogToConsole}
+                    label={t('settings.consoleLogLevel')}
+                    onChange={handleLogLevelChanged}
+                    value={consoleLogLevel}
+                    data={VALID_LOG_LEVELS.concat()}
+                  />
+                  <IAISwitch
+                    label={t('settings.enableImageDebugging')}
+                    isChecked={enableImageDebugging}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                      dispatch(setEnableImageDebugging(e.target.checked))
+                    }
+                  />
+                </Flex>
+              )}
+
+              <Flex sx={modalSectionStyles}>
+                <Heading size="sm">{t('settings.resetWebUI')}</Heading>
+                <IAIButton colorScheme="error" onClick={handleClickResetWebUI}>
+                  {t('settings.resetWebUI')}
+                </IAIButton>
+                {shouldShowResetWebUiText && (
+                  <>
+                    <Text>{t('settings.resetWebUIDesc1')}</Text>
+                    <Text>{t('settings.resetWebUIDesc2')}</Text>
+                  </>
                 )}
-              </div>
-              <IAISwitch
-                styleClass="settings-modal-item"
-                label={t('settings.confirmOnDelete')}
-                isChecked={shouldConfirmOnDelete}
-                onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  dispatch(setShouldConfirmOnDelete(e.target.checked))
-                }
-              />
-              <IAISwitch
-                styleClass="settings-modal-item"
-                label={t('settings.displayHelpIcons')}
-                isChecked={shouldDisplayGuides}
-                onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  dispatch(setShouldDisplayGuides(e.target.checked))
-                }
-              />
-              <IAISwitch
-                styleClass="settings-modal-item"
-                label={t('settings.useCanvasBeta')}
-                isChecked={shouldUseCanvasBetaLayout}
-                onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  dispatch(setShouldUseCanvasBetaLayout(e.target.checked))
-                }
-              />
-              <IAISwitch
-                styleClass="settings-modal-item"
-                label={t('settings.useSlidersForAll')}
-                isChecked={shouldUseSliders}
-                onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  dispatch(setShouldUseSliders(e.target.checked))
-                }
-              />
-            </div>
-
-            <div className="settings-modal-items">
-              <h2 style={{ fontWeight: 'bold' }}>Developer</h2>
-              <IAISwitch
-                styleClass="settings-modal-item"
-                label={t('settings.enableImageDebugging')}
-                isChecked={enableImageDebugging}
-                onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  dispatch(setEnableImageDebugging(e.target.checked))
-                }
-              />
-            </div>
-
-            <div className="settings-modal-reset">
-              <Heading size="md">{t('settings.resetWebUI')}</Heading>
-              <Button colorScheme="red" onClick={handleClickResetWebUI}>
-                {t('settings.resetWebUI')}
-              </Button>
-              <Text>{t('settings.resetWebUIDesc1')}</Text>
-              <Text>{t('settings.resetWebUIDesc2')}</Text>
-            </div>
+              </Flex>
+            </Flex>
           </ModalBody>
 
           <ModalFooter>
-            <Button onClick={onSettingsModalClose} className="modal-close-btn">
+            <IAIButton onClick={onSettingsModalClose}>
               {t('common.close')}
-            </Button>
+            </IAIButton>
           </ModalFooter>
         </ModalContent>
       </Modal>
@@ -244,15 +301,17 @@ const SettingsModal = ({ children }: SettingsModalProps) => {
         onClose={onRefreshModalClose}
         isCentered
       >
-        <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(40px)" />
+        <ModalOverlay backdropFilter="blur(40px)" />
         <ModalContent>
-          <ModalBody pb={6} pt={6}>
+          <ModalHeader />
+          <ModalBody>
             <Flex justifyContent="center">
               <Text fontSize="lg">
                 <Text>{t('settings.resetComplete')}</Text>
               </Text>
             </Flex>
           </ModalBody>
+          <ModalFooter />
         </ModalContent>
       </Modal>
     </>

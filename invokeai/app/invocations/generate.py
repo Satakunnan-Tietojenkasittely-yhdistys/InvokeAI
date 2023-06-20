@@ -1,93 +1,79 @@
 # Copyright (c) 2022 Kyle Schouviller (https://github.com/kyle0654)
 
-from datetime import datetime, timezone
-from typing import Any, Literal, Optional, Union
+from functools import partial
+from typing import Literal, Optional, Union, get_args
 
-import numpy as np
-from PIL import Image
-from pydantic import Field
-from skimage.exposure.histogram_matching import match_histograms
+import torch
+from diffusers import ControlNetModel
+from pydantic import BaseModel, Field
 
-from ..services.image_storage import ImageType
-from ..services.invocation_services import InvocationServices
-from .baseinvocation import BaseInvocation, InvocationContext
-from .image import ImageField, ImageOutput
+from invokeai.app.models.image import (ColorField, ImageCategory, ImageField,
+                                       ResourceOrigin)
+from invokeai.app.util.misc import SEED_MAX, get_random_seed
+from invokeai.backend.generator.inpaint import infill_methods
 
-SAMPLER_NAME_VALUES = Literal[
-    "ddim", "plms", "k_lms", "k_dpm_2", "k_dpm_2_a", "k_euler", "k_euler_a", "k_heun"
-]
+from ...backend.generator import Inpaint, InvokeAIGenerator
+from ...backend.stable_diffusion import PipelineIntermediateState
+from ..util.step_callback import stable_diffusion_step_callback
+from .baseinvocation import BaseInvocation, InvocationConfig, InvocationContext
+from .image import ImageOutput
+
+import re
+from ...backend.model_management.lora import ModelPatcher
+from ...backend.stable_diffusion.diffusers_pipeline import StableDiffusionGeneratorPipeline
+from .model import UNetField, VaeField
+from .compel import ConditioningField
+from contextlib import contextmanager, ExitStack, ContextDecorator
+
+SAMPLER_NAME_VALUES = Literal[tuple(InvokeAIGenerator.schedulers())]
+INFILL_METHODS = Literal[tuple(infill_methods())]
+DEFAULT_INFILL_METHOD = (
+    "patchmatch" if "patchmatch" in get_args(INFILL_METHODS) else "tile"
+)
 
 
-# Text to image
-class TextToImageInvocation(BaseInvocation):
-    """Generates an image using text2img."""
+from .latent import get_scheduler
 
-    type: Literal["txt2img"] = "txt2img"
+class OldModelContext(ContextDecorator):
+    model: StableDiffusionGeneratorPipeline
 
-    # Inputs
-    # TODO: consider making prompt optional to enable providing prompt through a link
-    # fmt: off
-    prompt: Optional[str] = Field(description="The prompt to generate an image from")
-    seed:        int = Field(default=-1,ge=-1, le=np.iinfo(np.uint32).max, description="The seed to use (-1 for a random seed)", )
-    steps:       int = Field(default=10, gt=0, description="The number of steps to use to generate the image")
-    width:       int = Field(default=512, multiple_of=64, gt=0, description="The width of the resulting image", )
-    height:      int = Field(default=512, multiple_of=64, gt=0, description="The height of the resulting image", )
-    cfg_scale: float = Field(default=7.5, gt=0, description="The Classifier-Free Guidance, higher values may result in a result closer to the prompt", )
-    sampler_name: SAMPLER_NAME_VALUES = Field(default="k_lms", description="The sampler to use" )
-    seamless:   bool = Field(default=False, description="Whether or not to generate an image that can tile without seams", )
-    model:       str = Field(default="", description="The model to use (currently ignored)")
-    progress_images: bool = Field(default=False, description="Whether or not to produce progress images during generation",  )
-    # fmt: on
+    def __init__(self, model):
+        self.model = model
 
-    # TODO: pass this an emitter method or something? or a session for dispatching?
-    def dispatch_progress(
-        self, context: InvocationContext, sample: Any = None, step: int = 0
-    ) -> None:
-        context.services.events.emit_generator_progress(
-            context.graph_execution_state_id,
-            self.id,
-            step,
-            float(step) / float(self.steps),
-        )
+    def __enter__(self):
+        return self.model
 
-    def invoke(self, context: InvocationContext) -> ImageOutput:
-        def step_callback(sample, step=0):
-            self.dispatch_progress(context, sample, step)
+    def __exit__(self, *exc):
+        return False
 
-        # Handle invalid model parameter
-        # TODO: figure out if this can be done via a validator that uses the model_cache
-        # TODO: How to get the default model name now?
-        if self.model is None or self.model == "":
-            self.model = context.services.generate.model_name
+class OldModelInfo:
+    name: str
+    hash: str
+    context: OldModelContext
 
-        # Set the model (if already cached, this does nothing)
-        context.services.generate.set_model(self.model)
-
-        results = context.services.generate.prompt2image(
-            prompt=self.prompt,
-            step_callback=step_callback,
-            **self.dict(
-                exclude={"prompt"}
-            ),  # Shorthand for passing all of the parameters above manually
-        )
-
-        # Results are image and seed, unwrap for now and ignore the seed
-        # TODO: pre-seed?
-        # TODO: can this return multiple results? Should it?
-        image_type = ImageType.RESULT
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
-        )
-        context.services.images.save(image_type, image_name, results[0][0])
-        return ImageOutput(
-            image=ImageField(image_type=image_type, image_name=image_name)
+    def __init__(self, name: str, hash: str, model: StableDiffusionGeneratorPipeline):
+        self.name = name
+        self.hash = hash
+        self.context = OldModelContext(
+            model=model,
         )
 
 
-class ImageToImageInvocation(TextToImageInvocation):
-    """Generates an image using img2img."""
+class InpaintInvocation(BaseInvocation):
+    """Generates an image using inpaint."""
 
-    type: Literal["img2img"] = "img2img"
+    type: Literal["inpaint"] = "inpaint"
+
+    positive_conditioning: Optional[ConditioningField] = Field(description="Positive conditioning for generation")
+    negative_conditioning: Optional[ConditioningField] = Field(description="Negative conditioning for generation")
+    seed:        int = Field(ge=0, le=SEED_MAX, description="The seed to use (omit for random)", default_factory=get_random_seed)
+    steps:       int = Field(default=30, gt=0, description="The number of steps to use to generate the image")
+    width:       int = Field(default=512, multiple_of=8, gt=0, description="The width of the resulting image", )
+    height:      int = Field(default=512, multiple_of=8, gt=0, description="The height of the resulting image", )
+    cfg_scale: float = Field(default=7.5, ge=1, description="The Classifier-Free Guidance, higher values may result in a result closer to the prompt", )
+    scheduler: SAMPLER_NAME_VALUES = Field(default="euler", description="The scheduler to use" )
+    unet: UNetField = Field(default=None, description="UNet model")
+    vae: VaeField = Field(default=None, description="Vae model")
 
     # Inputs
     image: Union[ImageField, None] = Field(description="The input image")
@@ -99,60 +85,41 @@ class ImageToImageInvocation(TextToImageInvocation):
         description="Whether or not the result should be fit to the aspect ratio of the input image",
     )
 
-    def invoke(self, context: InvocationContext) -> ImageOutput:
-        image = (
-            None
-            if self.image is None
-            else context.services.images.get(
-                self.image.image_type, self.image.image_name
-            )
-        )
-        mask = None
-
-        def step_callback(sample, step=0):
-            self.dispatch_progress(context, sample, step)
-
-        # Handle invalid model parameter
-        # TODO: figure out if this can be done via a validator that uses the model_cache
-        # TODO: How to get the default model name now?
-        if self.model is None or self.model == "":
-            self.model = context.services.generate.model_name
-
-        # Set the model (if already cached, this does nothing)
-        context.services.generate.set_model(self.model)
-
-        results = context.services.generate.prompt2image(
-            prompt=self.prompt,
-            init_img=image,
-            init_mask=mask,
-            step_callback=step_callback,
-            **self.dict(
-                exclude={"prompt", "image", "mask"}
-            ),  # Shorthand for passing all of the parameters above manually
-        )
-
-        result_image = results[0][0]
-
-        # Results are image and seed, unwrap for now and ignore the seed
-        # TODO: pre-seed?
-        # TODO: can this return multiple results? Should it?
-        image_type = ImageType.RESULT
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
-        )
-        context.services.images.save(image_type, image_name, result_image)
-        return ImageOutput(
-            image=ImageField(image_type=image_type, image_name=image_name)
-        )
-
-
-class InpaintInvocation(ImageToImageInvocation):
-    """Generates an image using inpaint."""
-
-    type: Literal["inpaint"] = "inpaint"
-
     # Inputs
     mask: Union[ImageField, None] = Field(description="The mask")
+    seam_size: int = Field(default=96, ge=1, description="The seam inpaint size (px)")
+    seam_blur: int = Field(
+        default=16, ge=0, description="The seam inpaint blur radius (px)"
+    )
+    seam_strength: float = Field(
+        default=0.75, gt=0, le=1, description="The seam inpaint strength"
+    )
+    seam_steps: int = Field(
+        default=30, ge=1, description="The number of steps to use for seam inpaint"
+    )
+    tile_size: int = Field(
+        default=32, ge=1, description="The tile infill method size (px)"
+    )
+    infill_method: INFILL_METHODS = Field(
+        default=DEFAULT_INFILL_METHOD,
+        description="The method used to infill empty regions (px)",
+    )
+    inpaint_width: Optional[int] = Field(
+        default=None,
+        multiple_of=8,
+        gt=0,
+        description="The width of the inpaint region (px)",
+    )
+    inpaint_height: Optional[int] = Field(
+        default=None,
+        multiple_of=8,
+        gt=0,
+        description="The height of the inpaint region (px)",
+    )
+    inpaint_fill: Optional[ColorField] = Field(
+        default=ColorField(r=127, g=127, b=127, a=255),
+        description="The solid infill method color",
+    )
     inpaint_replace: float = Field(
         default=0.0,
         ge=0.0,
@@ -160,52 +127,122 @@ class InpaintInvocation(ImageToImageInvocation):
         description="The amount by which to replace masked areas with latent noise",
     )
 
+    # Schema customisation
+    class Config(InvocationConfig):
+        schema_extra = {
+            "ui": {
+                "tags": ["stable-diffusion", "image"],
+            },
+        }
+
+    def dispatch_progress(
+        self,
+        context: InvocationContext,
+        source_node_id: str,
+        intermediate_state: PipelineIntermediateState,
+    ) -> None:
+        stable_diffusion_step_callback(
+            context=context,
+            intermediate_state=intermediate_state,
+            node=self.dict(),
+            source_node_id=source_node_id,
+        )
+
+    def get_conditioning(self, context):
+        c, extra_conditioning_info = context.services.latents.get(self.positive_conditioning.conditioning_name)
+        uc, _ = context.services.latents.get(self.negative_conditioning.conditioning_name)
+
+        return (uc, c, extra_conditioning_info)
+
+    @contextmanager
+    def load_model_old_way(self, context, scheduler):
+        unet_info = context.services.model_manager.get_model(**self.unet.unet.dict())
+        vae_info = context.services.model_manager.get_model(**self.vae.vae.dict())
+
+        #unet = unet_info.context.model
+        #vae = vae_info.context.model
+
+        with ExitStack() as stack:
+            loras = [(stack.enter_context(context.services.model_manager.get_model(**lora.dict(exclude={"weight"}))), lora.weight) for lora in self.unet.loras]
+
+            with vae_info as vae,\
+                 unet_info as unet,\
+                 ModelPatcher.apply_lora_unet(unet, loras):
+
+                device = context.services.model_manager.mgr.cache.execution_device
+                dtype = context.services.model_manager.mgr.cache.precision
+
+                pipeline = StableDiffusionGeneratorPipeline(
+                    vae=vae,
+                    text_encoder=None,
+                    tokenizer=None,
+                    unet=unet,
+                    scheduler=scheduler,
+                    safety_checker=None,
+                    feature_extractor=None,
+                    requires_safety_checker=False,
+                    precision="float16" if dtype == torch.float16 else "float32",
+                    execution_device=device,
+                )
+
+                yield OldModelInfo(
+                    name=self.unet.unet.model_name,
+                    hash="<NO-HASH>",
+                    model=pipeline,
+                )
+
     def invoke(self, context: InvocationContext) -> ImageOutput:
         image = (
             None
             if self.image is None
-            else context.services.images.get(
-                self.image.image_type, self.image.image_name
-            )
+            else context.services.images.get_pil_image(self.image.image_name)
         )
         mask = (
             None
             if self.mask is None
-            else context.services.images.get(self.mask.image_type, self.mask.image_name)
+            else context.services.images.get_pil_image(self.mask.image_name)
         )
 
-        def step_callback(sample, step=0):
-            self.dispatch_progress(context, sample, step)
+        # Get the source node id (we are invoking the prepared node)
+        graph_execution_state = context.services.graph_execution_manager.get(
+            context.graph_execution_state_id
+        )
+        source_node_id = graph_execution_state.prepared_source_mapping[self.id]
 
-        # Handle invalid model parameter
-        # TODO: figure out if this can be done via a validator that uses the model_cache
-        # TODO: How to get the default model name now?
-        if self.model is None or self.model == "":
-            self.model = context.services.generate.model_name
-
-        # Set the model (if already cached, this does nothing)
-        context.services.generate.set_model(self.model)
-
-        results = context.services.generate.prompt2image(
-            prompt=self.prompt,
-            init_img=image,
-            init_mask=mask,
-            step_callback=step_callback,
-            **self.dict(
-                exclude={"prompt", "image", "mask"}
-            ),  # Shorthand for passing all of the parameters above manually
+        conditioning = self.get_conditioning(context)
+        scheduler = get_scheduler(
+            context=context,
+            scheduler_info=self.unet.scheduler,
+            scheduler_name=self.scheduler,
         )
 
-        result_image = results[0][0]
+        with self.load_model_old_way(context, scheduler) as model:
+            outputs = Inpaint(model).generate(
+                conditioning=conditioning,
+                scheduler=scheduler,
+                init_image=image,
+                mask_image=mask,
+                step_callback=partial(self.dispatch_progress, context, source_node_id),
+                **self.dict(
+                    exclude={"positive_conditioning", "negative_conditioning", "scheduler", "image", "mask"}
+                ),  # Shorthand for passing all of the parameters above manually
+            )
 
-        # Results are image and seed, unwrap for now and ignore the seed
-        # TODO: pre-seed?
-        # TODO: can this return multiple results? Should it?
-        image_type = ImageType.RESULT
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        # Outputs is an infinite iterator that will return a new InvokeAIGeneratorOutput object
+        # each time it is called. We only need the first one.
+        generator_output = next(outputs)
+
+        image_dto = context.services.images.create(
+            image=generator_output.image,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            session_id=context.graph_execution_state_id,
+            node_id=self.id,
+            is_intermediate=self.is_intermediate,
         )
-        context.services.images.save(image_type, image_name, result_image)
+
         return ImageOutput(
-            image=ImageField(image_type=image_type, image_name=image_name)
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
         )

@@ -1,7 +1,6 @@
 import { ButtonGroup, Flex } from '@chakra-ui/react';
 import { createSelector } from '@reduxjs/toolkit';
-import { saveStagingAreaImageToGallery } from 'app/socketio/actions';
-import { useAppDispatch, useAppSelector } from 'app/storeHooks';
+import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
 import IAIIconButton from 'common/components/IAIIconButton';
 import { canvasSelector } from 'features/canvas/store/canvasSelectors';
 import {
@@ -12,7 +11,7 @@ import {
   setShouldShowStagingImage,
   setShouldShowStagingOutline,
 } from 'features/canvas/store/canvasSlice';
-import { isEqual } from 'lodash';
+import { isEqual } from 'lodash-es';
 
 import { useCallback } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
@@ -26,13 +25,14 @@ import {
   FaPlus,
   FaSave,
 } from 'react-icons/fa';
+import { stagingAreaImageSaved } from '../store/actions';
 
 const selector = createSelector(
   [canvasSelector],
   (canvas) => {
     const {
       layerState: {
-        stagingArea: { images, selectedImageIndex },
+        stagingArea: { images, selectedImageIndex, sessionId },
       },
       shouldShowStagingOutline,
       shouldShowStagingImage,
@@ -45,6 +45,7 @@ const selector = createSelector(
       isOnLastImage: selectedImageIndex === images.length - 1,
       shouldShowStagingImage,
       shouldShowStagingOutline,
+      sessionId,
     };
   },
   {
@@ -61,6 +62,7 @@ const IAICanvasStagingAreaToolbar = () => {
     isOnLastImage,
     currentStagingAreaImage,
     shouldShowStagingImage,
+    sessionId,
   } = useAppSelector(selector);
 
   const { t } = useTranslation();
@@ -106,16 +108,27 @@ const IAICanvasStagingAreaToolbar = () => {
     }
   );
 
-  const handlePrevImage = () => dispatch(prevStagingAreaImage());
-  const handleNextImage = () => dispatch(nextStagingAreaImage());
-  const handleAccept = () => dispatch(commitStagingAreaImage());
+  const handlePrevImage = useCallback(
+    () => dispatch(prevStagingAreaImage()),
+    [dispatch]
+  );
+
+  const handleNextImage = useCallback(
+    () => dispatch(nextStagingAreaImage()),
+    [dispatch]
+  );
+
+  const handleAccept = useCallback(
+    () => dispatch(commitStagingAreaImage(sessionId)),
+    [dispatch, sessionId]
+  );
 
   if (!currentStagingAreaImage) return null;
 
   return (
     <Flex
       pos="absolute"
-      bottom="1rem"
+      bottom={4}
       w="100%"
       align="center"
       justify="center"
@@ -129,7 +142,7 @@ const IAICanvasStagingAreaToolbar = () => {
           aria-label={`${t('unifiedCanvas.previous')} (Left)`}
           icon={<FaArrowLeft />}
           onClick={handlePrevImage}
-          data-selected={true}
+          colorScheme="accent"
           isDisabled={isOnFirstImage}
         />
         <IAIIconButton
@@ -137,7 +150,7 @@ const IAICanvasStagingAreaToolbar = () => {
           aria-label={`${t('unifiedCanvas.next')} (Right)`}
           icon={<FaArrowRight />}
           onClick={handleNextImage}
-          data-selected={true}
+          colorScheme="accent"
           isDisabled={isOnLastImage}
         />
         <IAIIconButton
@@ -145,7 +158,7 @@ const IAICanvasStagingAreaToolbar = () => {
           aria-label={`${t('unifiedCanvas.accept')} (Enter)`}
           icon={<FaCheck />}
           onClick={handleAccept}
-          data-selected={true}
+          colorScheme="accent"
         />
         <IAIIconButton
           tooltip={t('unifiedCanvas.showHide')}
@@ -155,26 +168,23 @@ const IAICanvasStagingAreaToolbar = () => {
           onClick={() =>
             dispatch(setShouldShowStagingImage(!shouldShowStagingImage))
           }
-          data-selected={true}
+          colorScheme="accent"
         />
         <IAIIconButton
           tooltip={t('unifiedCanvas.saveToGallery')}
           aria-label={t('unifiedCanvas.saveToGallery')}
           icon={<FaSave />}
           onClick={() =>
-            dispatch(
-              saveStagingAreaImageToGallery(currentStagingAreaImage.image.url)
-            )
+            dispatch(stagingAreaImageSaved(currentStagingAreaImage.image))
           }
-          data-selected={true}
+          colorScheme="accent"
         />
         <IAIIconButton
           tooltip={t('unifiedCanvas.discardAll')}
           aria-label={t('unifiedCanvas.discardAll')}
           icon={<FaPlus style={{ transform: 'rotate(45deg)' }} />}
           onClick={() => dispatch(discardStagedImages())}
-          data-selected={true}
-          style={{ backgroundColor: 'var(--btn-delete-image)' }}
+          colorScheme="error"
           fontSize={20}
         />
       </ButtonGroup>

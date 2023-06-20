@@ -22,7 +22,8 @@ class Invoker:
     def invoke(
         self, graph_execution_state: GraphExecutionState, invoke_all: bool = False
     ) -> str | None:
-        """Determines the next node to invoke and returns the id of the invoked node, or None if there are no nodes to execute"""
+        """Determines the next node to invoke and enqueues it, preparing if needed.
+        Returns the id of the queued node, or `None` if there are no nodes left to enqueue."""
 
         # Get the next invocation
         invocation = graph_execution_state.next()
@@ -33,7 +34,6 @@ class Invoker:
         self.services.graph_execution_manager.set(graph_execution_state)
 
         # Queue the invocation
-        print(f"queueing item {invocation.id}")
         self.services.queue.put(
             InvocationQueueItem(
                 # session_id    = session.id,
@@ -50,6 +50,10 @@ class Invoker:
         new_state = GraphExecutionState(graph=Graph() if graph is None else graph)
         self.services.graph_execution_manager.set(new_state)
         return new_state
+
+    def cancel(self, graph_execution_state_id: str) -> None:
+        """Cancels the given execution state"""
+        self.services.queue.cancel(graph_execution_state_id)
 
     def __start_service(self, service) -> None:
         # Call start() method on any services that have it
@@ -68,15 +72,9 @@ class Invoker:
         for service in vars(self.services):
             self.__start_service(getattr(self.services, service))
 
-        for service in vars(self.services):
-            self.__start_service(getattr(self.services, service))
-
     def stop(self) -> None:
         """Stops the invoker. A new invoker will have to be created to execute further."""
         # First stop all services
-        for service in vars(self.services):
-            self.__stop_service(getattr(self.services, service))
-
         for service in vars(self.services):
             self.__stop_service(getattr(self.services, service))
 

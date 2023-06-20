@@ -5,29 +5,30 @@ import IAIInput from 'common/components/IAIInput';
 import IAINumberInput from 'common/components/IAINumberInput';
 import { useEffect, useState } from 'react';
 
-import { useAppDispatch, useAppSelector } from 'app/storeHooks';
+import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
 import { systemSelector } from 'features/system/store/systemSelectors';
 
 import {
   Flex,
   FormControl,
-  FormErrorMessage,
-  FormHelperText,
   FormLabel,
   HStack,
   Text,
   VStack,
 } from '@chakra-ui/react';
 
-import { addNewModel } from 'app/socketio/actions';
+// import { addNewModel } from 'app/socketio/actions';
 import { Field, Formik } from 'formik';
 import { useTranslation } from 'react-i18next';
 
-import type { InvokeModelConfigProps } from 'app/invokeai';
-import type { RootState } from 'app/store';
+import type { InvokeModelConfigProps } from 'app/types/invokeai';
+import type { RootState } from 'app/store/store';
 import type { FieldInputProps, FormikProps } from 'formik';
-import { isEqual, pickBy } from 'lodash';
+import { isEqual, pickBy } from 'lodash-es';
 import ModelConvert from './ModelConvert';
+import IAIFormHelperText from 'common/components/IAIForms/IAIFormHelperText';
+import IAIFormErrorMessage from 'common/components/IAIForms/IAIFormErrorMessage';
+import IAIForm from 'common/components/IAIForm';
 
 const selector = createSelector(
   [systemSelector],
@@ -101,7 +102,7 @@ export default function CheckpointModelEdit() {
   };
 
   return openModel ? (
-    <Flex flexDirection="column" rowGap="1rem" width="100%">
+    <Flex flexDirection="column" rowGap={4} width="100%">
       <Flex alignItems="center" gap={4} justifyContent="space-between">
         <Text fontSize="lg" fontWeight="bold">
           {openModel}
@@ -112,7 +113,7 @@ export default function CheckpointModelEdit() {
         flexDirection="column"
         maxHeight={window.innerHeight - 270}
         overflowY="scroll"
-        paddingRight="2rem"
+        paddingInlineEnd={8}
       >
         <Formik
           enableReinitialize={true}
@@ -120,8 +121,8 @@ export default function CheckpointModelEdit() {
           onSubmit={editModelFormSubmitHandler}
         >
           {({ handleSubmit, errors, touched }) => (
-            <form onSubmit={handleSubmit}>
-              <VStack rowGap="0.5rem" alignItems="start">
+            <IAIForm onSubmit={handleSubmit}>
+              <VStack rowGap={2} alignItems="start">
                 {/* Description */}
                 <FormControl
                   isInvalid={!!errors.description && touched.description}
@@ -136,14 +137,16 @@ export default function CheckpointModelEdit() {
                       id="description"
                       name="description"
                       type="text"
-                      width="lg"
+                      width="full"
                     />
                     {!!errors.description && touched.description ? (
-                      <FormErrorMessage>{errors.description}</FormErrorMessage>
+                      <IAIFormErrorMessage>
+                        {errors.description}
+                      </IAIFormErrorMessage>
                     ) : (
-                      <FormHelperText margin={0}>
+                      <IAIFormHelperText>
                         {t('modelManager.descriptionValidationMsg')}
-                      </FormHelperText>
+                      </IAIFormHelperText>
                     )}
                   </VStack>
                 </FormControl>
@@ -162,14 +165,14 @@ export default function CheckpointModelEdit() {
                       id="config"
                       name="config"
                       type="text"
-                      width="lg"
+                      width="full"
                     />
                     {!!errors.config && touched.config ? (
-                      <FormErrorMessage>{errors.config}</FormErrorMessage>
+                      <IAIFormErrorMessage>{errors.config}</IAIFormErrorMessage>
                     ) : (
-                      <FormHelperText margin={0}>
+                      <IAIFormHelperText>
                         {t('modelManager.configValidationMsg')}
-                      </FormHelperText>
+                      </IAIFormHelperText>
                     )}
                   </VStack>
                 </FormControl>
@@ -188,14 +191,16 @@ export default function CheckpointModelEdit() {
                       id="weights"
                       name="weights"
                       type="text"
-                      width="lg"
+                      width="full"
                     />
                     {!!errors.weights && touched.weights ? (
-                      <FormErrorMessage>{errors.weights}</FormErrorMessage>
+                      <IAIFormErrorMessage>
+                        {errors.weights}
+                      </IAIFormErrorMessage>
                     ) : (
-                      <FormHelperText margin={0}>
+                      <IAIFormHelperText>
                         {t('modelManager.modelLocationValidationMsg')}
-                      </FormHelperText>
+                      </IAIFormHelperText>
                     )}
                   </VStack>
                 </FormControl>
@@ -211,14 +216,14 @@ export default function CheckpointModelEdit() {
                       id="vae"
                       name="vae"
                       type="text"
-                      width="lg"
+                      width="full"
                     />
                     {!!errors.vae && touched.vae ? (
-                      <FormErrorMessage>{errors.vae}</FormErrorMessage>
+                      <IAIFormErrorMessage>{errors.vae}</IAIFormErrorMessage>
                     ) : (
-                      <FormHelperText margin={0}>
+                      <IAIFormHelperText>
                         {t('modelManager.vaeLocationValidationMsg')}
-                      </FormHelperText>
+                      </IAIFormHelperText>
                     )}
                   </VStack>
                 </FormControl>
@@ -253,11 +258,13 @@ export default function CheckpointModelEdit() {
                       </Field>
 
                       {!!errors.width && touched.width ? (
-                        <FormErrorMessage>{errors.width}</FormErrorMessage>
+                        <IAIFormErrorMessage>
+                          {errors.width}
+                        </IAIFormErrorMessage>
                       ) : (
-                        <FormHelperText margin={0}>
+                        <IAIFormHelperText>
                           {t('modelManager.widthValidationMsg')}
-                        </FormHelperText>
+                        </IAIFormHelperText>
                       )}
                     </VStack>
                   </FormControl>
@@ -291,11 +298,13 @@ export default function CheckpointModelEdit() {
                       </Field>
 
                       {!!errors.height && touched.height ? (
-                        <FormErrorMessage>{errors.height}</FormErrorMessage>
+                        <IAIFormErrorMessage>
+                          {errors.height}
+                        </IAIFormErrorMessage>
                       ) : (
-                        <FormHelperText margin={0}>
+                        <IAIFormHelperText>
                           {t('modelManager.heightValidationMsg')}
-                        </FormHelperText>
+                        </IAIFormHelperText>
                       )}
                     </VStack>
                   </FormControl>
@@ -309,22 +318,22 @@ export default function CheckpointModelEdit() {
                   {t('modelManager.updateModel')}
                 </IAIButton>
               </VStack>
-            </form>
+            </IAIForm>
           )}
         </Formik>
       </Flex>
     </Flex>
   ) : (
     <Flex
-      width="100%"
-      justifyContent="center"
-      alignItems="center"
-      backgroundColor="var(--background-color)"
-      borderRadius="0.5rem"
+      sx={{
+        width: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRadius: 'base',
+        bg: 'base.900',
+      }}
     >
-      <Text fontWeight="bold" color="var(--subtext-color-bright)">
-        Pick A Model To Edit
-      </Text>
+      <Text fontWeight={500}>Pick A Model To Edit</Text>
     </Flex>
   );
 }

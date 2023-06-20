@@ -6,16 +6,18 @@ import {
   Tooltip,
   TooltipProps,
 } from '@chakra-ui/react';
-import { MouseEvent } from 'react';
+import { memo, MouseEvent } from 'react';
+import IAIOption from './IAIOption';
 
 type IAISelectProps = SelectProps & {
   label?: string;
-  styleClass?: string;
   tooltip?: string;
   tooltipProps?: Omit<TooltipProps, 'children'>;
   validValues:
     | Array<number | string>
     | Array<{ key: string; value: string | number }>;
+  horizontal?: boolean;
+  spaceEvenly?: boolean;
 };
 /**
  * Customized Chakra FormControl + Select multi-part component.
@@ -27,54 +29,50 @@ const IAISelect = (props: IAISelectProps) => {
     validValues,
     tooltip,
     tooltipProps,
-    size = 'sm',
-    fontSize = 'sm',
-    styleClass,
+    horizontal,
+    spaceEvenly,
     ...rest
   } = props;
   return (
     <FormControl
       isDisabled={isDisabled}
-      className={`invokeai__select ${styleClass}`}
       onClick={(e: MouseEvent<HTMLDivElement>) => {
         e.stopPropagation();
         e.nativeEvent.stopImmediatePropagation();
         e.nativeEvent.stopPropagation();
         e.nativeEvent.cancelBubble = true;
       }}
+      sx={
+        horizontal
+          ? {
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 4,
+            }
+          : {}
+      }
     >
       {label && (
-        <FormLabel
-          className="invokeai__select-label"
-          fontSize={fontSize}
-          fontWeight="bold"
-          marginRight={0}
-          marginBottom={0}
-          whiteSpace="nowrap"
-        >
+        <FormLabel sx={spaceEvenly ? { flexBasis: 0, flexGrow: 1 } : {}}>
           {label}
         </FormLabel>
       )}
       <Tooltip label={tooltip} {...tooltipProps}>
         <Select
-          className="invokeai__select-picker"
-          fontSize={fontSize}
-          size={size}
           {...rest}
+          rootProps={{ sx: spaceEvenly ? { flexBasis: 0, flexGrow: 1 } : {} }}
         >
           {validValues.map((opt) => {
             return typeof opt === 'string' || typeof opt === 'number' ? (
-              <option key={opt} value={opt} className="invokeai__select-option">
+              <IAIOption key={opt} value={opt}>
                 {opt}
-              </option>
+              </IAIOption>
             ) : (
-              <option
-                key={opt.value}
-                value={opt.value}
-                className="invokeai__select-option"
-              >
+              <IAIOption key={opt.value} value={opt.value}>
                 {opt.key}
-              </option>
+              </IAIOption>
             );
           })}
         </Select>
@@ -83,4 +81,4 @@ const IAISelect = (props: IAISelectProps) => {
   );
 };
 
-export default IAISelect;
+export default memo(IAISelect);

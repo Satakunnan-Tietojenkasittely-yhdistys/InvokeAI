@@ -1,16 +1,18 @@
 import {
   Flex,
   Modal,
+  ModalBody,
   ModalCloseButton,
   ModalContent,
+  ModalFooter,
   ModalHeader,
   ModalOverlay,
   useDisclosure,
 } from '@chakra-ui/react';
 import { cloneElement } from 'react';
 
-import { RootState } from 'app/store';
-import { useAppSelector } from 'app/storeHooks';
+import { RootState } from 'app/store/store';
+import { useAppSelector } from 'app/store/storeHooks';
 import { useTranslation } from 'react-i18next';
 
 import type { ReactElement } from 'react';
@@ -50,22 +52,23 @@ export default function ModelManagerModal({
       <Modal
         isOpen={isModelManagerModalOpen}
         onClose={onModelManagerModalClose}
-        size="6xl"
+        size="full"
       >
         <ModalOverlay />
-        <ModalContent className="modal" fontFamily="Inter">
-          <ModalCloseButton className="modal-close-btn" />
-          <ModalHeader fontWeight="bold">
-            {t('modelManager.modelManager')}
-          </ModalHeader>
-          <Flex padding="0 1.5rem 1.5rem 1.5rem" width="100%" columnGap="2rem">
-            <ModelList />
-            {openModel && model_list[openModel]['format'] === 'diffusers' ? (
-              <DiffusersModelEdit />
-            ) : (
-              <CheckpointModelEdit />
-            )}
-          </Flex>
+        <ModalContent>
+          <ModalCloseButton />
+          <ModalHeader>{t('modelManager.modelManager')}</ModalHeader>
+          <ModalBody>
+            <Flex width="100%" columnGap={8}>
+              <ModelList />
+              {openModel && model_list[openModel]['format'] === 'diffusers' ? (
+                <DiffusersModelEdit />
+              ) : (
+                <CheckpointModelEdit />
+              )}
+            </Flex>
+          </ModalBody>
+          <ModalFooter />
         </ModalContent>
       </Modal>
     </>

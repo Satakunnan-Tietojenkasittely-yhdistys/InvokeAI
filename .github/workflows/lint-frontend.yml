@@ -4,9 +4,17 @@ on:
   pull_request:
     paths:
       - 'invokeai/frontend/web/**'
+    types:
+      - 'ready_for_review'
+      - 'opened'
+      - 'synchronize'
   push:
+    branches:
+      - 'main'
     paths:
       - 'invokeai/frontend/web/**'
+  merge_group:
+  workflow_dispatch:
 
 defaults:
   run:
@@ -23,7 +31,7 @@ jobs:
           node-version: '18'
       - uses: actions/checkout@v3
       - run: 'yarn install --frozen-lockfile'
-      - run: 'yarn tsc'
-      - run: 'yarn run madge'
-      - run: 'yarn run lint --max-warnings=0'
-      - run: 'yarn run prettier --check'
+      - run: 'yarn run lint:tsc'
+      - run: 'yarn run lint:madge'
+      - run: 'yarn run lint:eslint'
+      - run: 'yarn run lint:prettier'

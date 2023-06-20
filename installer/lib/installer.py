@@ -247,8 +247,8 @@ class InvokeAiInstance:
             pip[
                 "install",
                 "--require-virtualenv",
-                "torch",
-                "torchvision",
+                "torch~=2.0.0",
+                "torchvision>=0.14.1",
                 "--force-reinstall",
                 "--find-links" if find_links is not None else None,
                 find_links,
@@ -456,7 +456,7 @@ def get_torch_source() -> (Union[str, None],str):
     optional_modules = None
     if OS == "Linux":
         if device == "rocm":
-            url = "https://download.pytorch.org/whl/rocm5.2"
+            url = "https://download.pytorch.org/whl/rocm5.4.2"
         elif device == "cpu":
             url = "https://download.pytorch.org/whl/cpu"
 

@@ -4,6 +4,7 @@ invokeai.backend.generator.inpaint descends from .generator
 from __future__ import annotations
 
 import math
+from typing import Tuple, Union
 
 import cv2
 import numpy as np
@@ -59,7 +60,7 @@ class Inpaint(Img2Img):
             writeable=False,
         )
 
-    def infill_patchmatch(self, im: Image.Image) -> Image:
+    def infill_patchmatch(self, im: Image.Image) -> Image.Image:
         if im.mode != "RGBA":
             return im
 
@@ -75,18 +76,18 @@ class Inpaint(Img2Img):
         return im_patched
 
     def tile_fill_missing(
-        self, im: Image.Image, tile_size: int = 16, seed: int = None
-    ) -> Image:
+        self, im: Image.Image, tile_size: int = 16, seed: Union[int, None] = None
+    ) -> Image.Image:
         # Only fill if there's an alpha layer
         if im.mode != "RGBA":
             return im
 
         a = np.asarray(im, dtype=np.uint8)
 
-        tile_size = (tile_size, tile_size)
+        tile_size_tuple = (tile_size, tile_size)
 
         # Get the image as tiles of a specified size
-        tiles = self.get_tile_images(a, *tile_size).copy()
+        tiles = self.get_tile_images(a, *tile_size_tuple).copy()
 
         # Get the mask as tiles
         tiles_mask = tiles[:, :, :, :, 3]
@@ -127,7 +128,9 @@ class Inpaint(Img2Img):
 
         return si
 
-    def mask_edge(self, mask: Image, edge_size: int, edge_blur: int) -> Image:
+    def mask_edge(
+        self, mask: Image.Image, edge_size: int, edge_blur: int
+    ) -> Image.Image:
         npimg = np.asarray(mask, dtype=np.uint8)
 
         # Detect any partially transparent regions
@@ -158,8 +161,7 @@ class Inpaint(Img2Img):
         im: Image.Image,
         seam_size: int,
         seam_blur: int,
-        prompt,
-        sampler,
+        seed,
         steps,
         cfg_scale,
         ddim_eta,
@@ -173,8 +175,6 @@ class Inpaint(Img2Img):
         mask = self.mask_edge(hard_mask, seam_size, seam_blur)
 
         make_image = self.get_make_image(
-            prompt,
-            sampler,
             steps,
             cfg_scale,
             ddim_eta,
@@ -192,28 +192,26 @@ class Inpaint(Img2Img):
 
         seam_noise = self.get_noise(im.width, im.height)
 
-        result = make_image(seam_noise)
+        result = make_image(seam_noise, seed=None)
 
         return result
 
     @torch.no_grad()
     def get_make_image(
         self,
-        prompt,
-        sampler,
         steps,
         cfg_scale,
         ddim_eta,
         conditioning,
-        init_image: PIL.Image.Image | torch.FloatTensor,
-        mask_image: PIL.Image.Image | torch.FloatTensor,
+        init_image: Image.Image | torch.FloatTensor,
+        mask_image: Image.Image | torch.FloatTensor,
         strength: float,
         mask_blur_radius: int = 8,
         # Seam settings - when 0, doesn't fill seam
-        seam_size: int = 0,
-        seam_blur: int = 0,
+        seam_size: int = 96,
+        seam_blur: int = 16,
         seam_strength: float = 0.7,
-        seam_steps: int = 10,
+        seam_steps: int = 30,
         tile_size: int = 32,
         step_callback=None,
         inpaint_replace=False,
@@ -221,7 +219,7 @@ class Inpaint(Img2Img):
         infill_method=None,
         inpaint_width=None,
         inpaint_height=None,
-        inpaint_fill: tuple(int) = (0x7F, 0x7F, 0x7F, 0xFF),
+        inpaint_fill: Tuple[int, int, int, int] = (0x7F, 0x7F, 0x7F, 0xFF),
         attention_maps_callback=None,
         **kwargs,
     ):
@@ -238,7 +236,7 @@ class Inpaint(Img2Img):
         self.inpaint_width = inpaint_width
         self.inpaint_height = inpaint_height
 
-        if isinstance(init_image, PIL.Image.Image):
+        if isinstance(init_image, Image.Image):
             self.pil_image = init_image.copy()
 
             # Do infill
@@ -249,8 +247,8 @@ class Inpaint(Img2Img):
                     self.pil_image.copy(), seed=self.seed, tile_size=tile_size
                 )
             elif infill_method == "solid":
-                solid_bg = PIL.Image.new("RGBA", init_image.size, inpaint_fill)
-                init_filled = PIL.Image.alpha_composite(solid_bg, init_image)
+                solid_bg = Image.new("RGBA", init_image.size, inpaint_fill)
+                init_filled = Image.alpha_composite(solid_bg, init_image)
             else:
                 raise ValueError(
                     f"Non-supported infill type {infill_method}", infill_method
@@ -268,7 +266,7 @@ class Inpaint(Img2Img):
             # Create init tensor
             init_image = image_resized_to_grid_as_tensor(init_filled.convert("RGB"))
 
-        if isinstance(mask_image, PIL.Image.Image):
+        if isinstance(mask_image, Image.Image):
             self.pil_mask = mask_image.copy()
             debug_image(
                 mask_image,
@@ -302,7 +300,6 @@ class Inpaint(Img2Img):
 
         # noinspection PyTypeChecker
         pipeline: StableDiffusionGeneratorPipeline = self.model
-        pipeline.scheduler = sampler
 
         # todo: support cross-attention control
         uc, c, _ = conditioning
@@ -310,7 +307,7 @@ class Inpaint(Img2Img):
             uc, c, cfg_scale
         ).add_scheduler_args_if_applicable(pipeline.scheduler, eta=ddim_eta)
 
-        def make_image(x_T):
+        def make_image(x_T: torch.Tensor, seed: int):
             pipeline_output = pipeline.inpaint_from_embeddings(
                 init_image=init_image,
                 mask=1 - mask,  # expects white means "paint here."
@@ -319,6 +316,7 @@ class Inpaint(Img2Img):
                 conditioning_data=conditioning_data,
                 noise_func=self.get_noise_like,
                 callback=step_callback,
+                seed=seed,
             )
 
             if (
@@ -340,8 +338,7 @@ class Inpaint(Img2Img):
                     result,
                     seam_size,
                     seam_blur,
-                    prompt,
-                    sampler,
+                    seed,
                     seam_steps,
                     cfg_scale,
                     ddim_eta,
@@ -354,8 +351,6 @@ class Inpaint(Img2Img):
 
                 # Restore original settings
                 self.get_make_image(
-                    prompt,
-                    sampler,
                     steps,
                     cfg_scale,
                     ddim_eta,

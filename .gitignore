@@ -9,6 +9,8 @@ models/ldm/stable-diffusion-v1/model.ckpt
 configs/models.user.yaml
 config/models.user.yml
 invokeai.init
+.version
+.last_model
 
 # ignore the Anaconda/Miniconda installer used while building Docker image
 anaconda.sh
@@ -63,6 +65,7 @@ pip-delete-this-directory.txt
 htmlcov/
 .tox/
 .nox/
+.coveragerc
 .coverage
 .coverage.*
 .cache
@@ -73,6 +76,7 @@ cov.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.pytest.ini
 cover/
 junit/
 
@@ -196,6 +200,8 @@ testtube
 checkpoints
 # If it's a Mac
 .DS_Store
+
+invokeai/frontend/web/dist/*
 
 # Let the frontend manage its own gitignore
 !invokeai/frontend/web/*

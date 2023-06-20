@@ -1,12 +1,10 @@
-import { useToast } from '@chakra-ui/react';
-import { ImageUploaderTriggerContext } from 'app/contexts/ImageUploaderTriggerContext';
-import { useAppDispatch, useAppSelector } from 'app/storeHooks';
+import { Box } from '@chakra-ui/react';
+import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
 import useImageUploader from 'common/hooks/useImageUploader';
-import { uploadImage } from 'features/gallery/store/thunks/uploadImage';
-import { tabDict } from 'features/ui/components/InvokeTabs';
 import { activeTabNameSelector } from 'features/ui/store/uiSelectors';
 import {
   KeyboardEvent,
+  memo,
   ReactNode,
   useCallback,
   useEffect,
@@ -14,7 +12,25 @@ import {
 } from 'react';
 import { FileRejection, useDropzone } from 'react-dropzone';
 import { useTranslation } from 'react-i18next';
+import { imageUploaded } from 'services/thunks/image';
 import ImageUploadOverlay from './ImageUploadOverlay';
+import { useAppToaster } from 'app/components/Toaster';
+import { createSelector } from '@reduxjs/toolkit';
+import { systemSelector } from 'features/system/store/systemSelectors';
+
+const selector = createSelector(
+  [systemSelector, activeTabNameSelector],
+  (system, activeTabName) => {
+    const { isConnected, isUploading } = system;
+
+    const isUploaderDisabled = !isConnected || isUploading;
+
+    return {
+      isUploaderDisabled,
+      activeTabName,
+    };
+  }
+);
 
 type ImageUploaderProps = {
   children: ReactNode;
@@ -23,38 +39,50 @@ type ImageUploaderProps = {
 const ImageUploader = (props: ImageUploaderProps) => {
   const { children } = props;
   const dispatch = useAppDispatch();
-  const activeTabName = useAppSelector(activeTabNameSelector);
-  const toast = useToast({});
+  const { isUploaderDisabled, activeTabName } = useAppSelector(selector);
+  const toaster = useAppToaster();
   const { t } = useTranslation();
   const [isHandlingUpload, setIsHandlingUpload] = useState<boolean>(false);
-  const { setOpenUploader } = useImageUploader();
+  const { setOpenUploaderFunction } = useImageUploader();
 
   const fileRejectionCallback = useCallback(
     (rejection: FileRejection) => {
       setIsHandlingUpload(true);
-      const msg = rejection.errors.reduce(
-        (acc: string, cur: { message: string }) => `${acc}\n${cur.message}`,
-        ''
-      );
-      toast({
+
+      toaster({
         title: t('toast.uploadFailed'),
-        description: msg,
+        description: rejection.errors.map((error) => error.message).join('\n'),
         status: 'error',
-        isClosable: true,
       });
     },
-    [t, toast]
+    [t, toaster]
   );
 
   const fileAcceptedCallback = useCallback(
     async (file: File) => {
-      dispatch(uploadImage({ imageFile: file }));
+      dispatch(
+        imageUploaded({
+          formData: { file },
+          imageCategory: 'user',
+          isIntermediate: false,
+          postUploadAction: { type: 'TOAST_UPLOADED' },
+        })
+      );
     },
     [dispatch]
   );
 
   const onDrop = useCallback(
     (acceptedFiles: Array<File>, fileRejections: Array<FileRejection>) => {
+      if (fileRejections.length > 1) {
+        toaster({
+          title: t('toast.uploadFailed'),
+          description: t('toast.uploadFailedInvalidUploadDesc'),
+          status: 'error',
+        });
+        return;
+      }
+
       fileRejections.forEach((rejection: FileRejection) => {
         fileRejectionCallback(rejection);
       });
@@ -63,7 +91,7 @@ const ImageUploader = (props: ImageUploaderProps) => {
         fileAcceptedCallback(file);
       });
     },
-    [fileAcceptedCallback, fileRejectionCallback]
+    [t, toaster, fileAcceptedCallback, fileRejectionCallback]
   );
 
   const {
@@ -72,93 +100,65 @@ const ImageUploader = (props: ImageUploaderProps) => {
     isDragAccept,
     isDragReject,
     isDragActive,
+    inputRef,
     open,
   } = useDropzone({
     accept: { 'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg', '.png'] },
     noClick: true,
     onDrop,
     onDragOver: () => setIsHandlingUpload(true),
-    maxFiles: 1,
+    disabled: isUploaderDisabled,
+    multiple: false,
   });
 
-  setOpenUploader(open);
-
   useEffect(() => {
-    const pasteImageListener = (e: ClipboardEvent) => {
-      const dataTransferItemList = e.clipboardData?.items;
-      if (!dataTransferItemList) return;
-
-      const imageItems: Array<DataTransferItem> = [];
-
-      for (const item of dataTransferItemList) {
-        if (
-          item.kind === 'file' &&
-          ['image/png', 'image/jpg'].includes(item.type)
-        ) {
-          imageItems.push(item);
-        }
-      }
-
-      if (!imageItems.length) return;
-
-      e.stopImmediatePropagation();
-
-      if (imageItems.length > 1) {
-        toast({
-          description: t('toast.uploadFailedMultipleImagesDesc'),
-          status: 'error',
-          isClosable: true,
-        });
+    // This is a hack to allow pasting images into the uploader
+    const handlePaste = async (e: ClipboardEvent) => {
+      if (!inputRef.current) {
         return;
       }
 
-      const file = imageItems[0].getAsFile();
-
-      if (!file) {
-        toast({
-          description: t('toast.uploadFailedUnableToLoadDesc'),
-          status: 'error',
-          isClosable: true,
-        });
-        return;
+      if (e.clipboardData?.files) {
+        // Set the files on the inputRef
+        inputRef.current.files = e.clipboardData.files;
+        // Dispatch the change event, dropzone catches this and we get to use its own validation
+        inputRef.current?.dispatchEvent(new Event('change', { bubbles: true }));
       }
-
-      dispatch(uploadImage({ imageFile: file }));
     };
-    document.addEventListener('paste', pasteImageListener);
+
+    // Set the open function so we can open the uploader from anywhere
+    setOpenUploaderFunction(open);
+
+    // Add the paste event listener
+    document.addEventListener('paste', handlePaste);
+
     return () => {
-      document.removeEventListener('paste', pasteImageListener);
+      document.removeEventListener('paste', handlePaste);
+      setOpenUploaderFunction(() => {
+        return;
+      });
     };
-  }, [t, dispatch, toast, activeTabName]);
-
-  const overlaySecondaryText = ['img2img', 'unifiedCanvas'].includes(
-    activeTabName
-  )
-    ? ` to ${tabDict[activeTabName as keyof typeof tabDict].tooltip}`
-    : ``;
+  }, [inputRef, open, setOpenUploaderFunction]);
 
   return (
-    <ImageUploaderTriggerContext.Provider value={open}>
-      <div
-        {...getRootProps({ style: {} })}
-        onKeyDown={(e: KeyboardEvent) => {
-          // Bail out if user hits spacebar - do not open the uploader
-          if (e.key === ' ') return;
-        }}
-      >
-        <input {...getInputProps()} />
-        {children}
-        {isDragActive && isHandlingUpload && (
-          <ImageUploadOverlay
-            isDragAccept={isDragAccept}
-            isDragReject={isDragReject}
-            overlaySecondaryText={overlaySecondaryText}
-            setIsHandlingUpload={setIsHandlingUpload}
-          />
-        )}
-      </div>
-    </ImageUploaderTriggerContext.Provider>
+    <Box
+      {...getRootProps({ style: {} })}
+      onKeyDown={(e: KeyboardEvent) => {
+        // Bail out if user hits spacebar - do not open the uploader
+        if (e.key === ' ') return;
+      }}
+    >
+      <input {...getInputProps()} />
+      {children}
+      {isDragActive && isHandlingUpload && (
+        <ImageUploadOverlay
+          isDragAccept={isDragAccept}
+          isDragReject={isDragReject}
+          setIsHandlingUpload={setIsHandlingUpload}
+        />
+      )}
+    </Box>
   );
 };
 
-export default ImageUploader;
+export default memo(ImageUploader);

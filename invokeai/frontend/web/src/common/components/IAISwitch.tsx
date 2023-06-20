@@ -5,14 +5,16 @@ import {
   FormLabelProps,
   Switch,
   SwitchProps,
+  Tooltip,
 } from '@chakra-ui/react';
+import { memo } from 'react';
 
 interface Props extends SwitchProps {
   label?: string;
   width?: string | number;
-  styleClass?: string;
   formControlProps?: FormControlProps;
   formLabelProps?: FormLabelProps;
+  tooltip?: string;
 }
 
 /**
@@ -25,36 +27,28 @@ const IAISwitch = (props: Props) => {
     width = 'auto',
     formControlProps,
     formLabelProps,
-    styleClass,
+    tooltip,
     ...rest
   } = props;
   return (
-    <FormControl
-      isDisabled={isDisabled}
-      width={width}
-      className={`invokeai__switch-form-control ${styleClass}`}
-      display="flex"
-      columnGap="1rem"
-      alignItems="center"
-      justifyContent="space-between"
-      {...formControlProps}
-    >
-      <FormLabel
-        className="invokeai__switch-form-label"
-        whiteSpace="nowrap"
-        marginRight={0}
-        marginTop={0.5}
-        marginBottom={0.5}
-        fontSize="sm"
-        fontWeight="bold"
-        width="auto"
-        {...formLabelProps}
+    <Tooltip label={tooltip} hasArrow placement="top" isDisabled={!tooltip}>
+      <FormControl
+        isDisabled={isDisabled}
+        width={width}
+        display="flex"
+        gap={4}
+        alignItems="center"
+        {...formControlProps}
       >
-        {label}
-      </FormLabel>
-      <Switch className="invokeai__switch-root" {...rest} />
-    </FormControl>
+        {label && (
+          <FormLabel my={1} flexGrow={1} {...formLabelProps}>
+            {label}
+          </FormLabel>
+        )}
+        <Switch {...rest} />
+      </FormControl>
+    </Tooltip>
   );
 };
 
-export default IAISwitch;
+export default memo(IAISwitch);

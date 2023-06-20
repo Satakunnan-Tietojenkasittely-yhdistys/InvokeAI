@@ -1,8 +1,7 @@
 import math
-import warnings
 
-from PIL import Image, ImageFilter
-
+from PIL import Image
+import invokeai.backend.util.logging as logger
 
 class Outcrop(object):
     def __init__(
@@ -27,7 +26,7 @@ class Outcrop(object):
         # switch samplers temporarily
         curr_sampler = self.generate.sampler
         self.generate.sampler_name = opt.sampler_name
-        self.generate._set_sampler()
+        self.generate._set_scheduler()
 
         def wrapped_callback(img, seed, **kwargs):
             preferred_seed = (
@@ -83,7 +82,7 @@ class Outcrop(object):
             pixels = extents[direction]
             # round pixels up to the nearest 64
             pixels = math.ceil(pixels / 64) * 64
-            print(f">> extending image {direction}ward by {pixels} pixels")
+            logger.info(f"extending image {direction}ward by {pixels} pixels")
             image = self._rotate(image, direction)
             image = self._extend(image, pixels)
             image = self._rotate(image, direction, reverse=True)

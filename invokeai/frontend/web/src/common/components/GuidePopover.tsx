@@ -2,15 +2,16 @@ import {
   Box,
   Popover,
   PopoverArrow,
+  PopoverBody,
   PopoverContent,
   PopoverTrigger,
 } from '@chakra-ui/react';
 import { createSelector } from '@reduxjs/toolkit';
 import { Feature, useFeatureHelpInfo } from 'app/features';
-import { useAppSelector } from 'app/storeHooks';
+import { useAppSelector } from 'app/store/storeHooks';
 import { systemSelector } from 'features/system/store/systemSelectors';
 import { SystemState } from 'features/system/store/systemSlice';
-import { ReactElement } from 'react';
+import { memo, ReactElement } from 'react';
 
 type GuideProps = {
   children: ReactElement;
@@ -29,21 +30,20 @@ const GuidePopover = ({ children, feature }: GuideProps) => {
   if (!shouldDisplayGuides) return null;
 
   return (
-    <Popover trigger="hover">
+    <Popover trigger="hover" isLazy>
       <PopoverTrigger>
         <Box>{children}</Box>
       </PopoverTrigger>
       <PopoverContent
-        className="guide-popover-content"
         maxWidth="400px"
         onClick={(e) => e.preventDefault()}
         cursor="initial"
       >
-        <PopoverArrow className="guide-popover-arrow" />
-        <div className="guide-popover-guide-content">{text}</div>
+        <PopoverArrow />
+        <PopoverBody>{text}</PopoverBody>
       </PopoverContent>
     </Popover>
   );
 };
 
-export default GuidePopover;
+export default memo(GuidePopover);

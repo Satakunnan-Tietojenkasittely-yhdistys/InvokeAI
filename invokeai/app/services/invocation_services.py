@@ -1,36 +1,60 @@
-# Copyright (c) 2022 Kyle Schouviller (https://github.com/kyle0654)
-from invokeai.backend import Generate
+# Copyright (c) 2022 Kyle Schouviller (https://github.com/kyle0654) and the InvokeAI Team
+from __future__ import annotations
+from typing import TYPE_CHECKING
 
-from .events import EventServiceBase
-from .image_storage import ImageStorageBase
-from .invocation_queue import InvocationQueueABC
-from .item_storage import ItemStorageABC
+if TYPE_CHECKING:
+    from logging import Logger
+    from invokeai.app.services.images import ImageService
+    from invokeai.backend import ModelManager
+    from invokeai.app.services.events import EventServiceBase
+    from invokeai.app.services.latent_storage import LatentsStorageBase
+    from invokeai.app.services.restoration_services import RestorationServices
+    from invokeai.app.services.invocation_queue import InvocationQueueABC
+    from invokeai.app.services.item_storage import ItemStorageABC
+    from invokeai.app.services.config import InvokeAISettings
+    from invokeai.app.services.graph import GraphExecutionState, LibraryGraph
+    from invokeai.app.services.invoker import InvocationProcessorABC
 
 
 class InvocationServices:
     """Services that can be used by invocations"""
 
-    generate: Generate  # TODO: wrap Generate, or split it up from model?
-    events: EventServiceBase
-    images: ImageStorageBase
-    queue: InvocationQueueABC
+    # TODO: Just forward-declared everything due to circular dependencies. Fix structure.
+    events: "EventServiceBase"
+    latents: "LatentsStorageBase"
+    queue: "InvocationQueueABC"
+    model_manager: "ModelManager"
+    restoration: "RestorationServices"
+    configuration: "InvokeAISettings"
+    images: "ImageService"
 
     # NOTE: we must forward-declare any types that include invocations, since invocations can use services
-    graph_execution_manager: ItemStorageABC["GraphExecutionState"]
+    graph_library: "ItemStorageABC"["LibraryGraph"]
+    graph_execution_manager: "ItemStorageABC"["GraphExecutionState"]
     processor: "InvocationProcessorABC"
 
     def __init__(
         self,
-        generate: Generate,
-        events: EventServiceBase,
-        images: ImageStorageBase,
-        queue: InvocationQueueABC,
-        graph_execution_manager: ItemStorageABC["GraphExecutionState"],
+        model_manager: "ModelManager",
+        events: "EventServiceBase",
+        logger: "Logger",
+        latents: "LatentsStorageBase",
+        images: "ImageService",
+        queue: "InvocationQueueABC",
+        graph_library: "ItemStorageABC"["LibraryGraph"],
+        graph_execution_manager: "ItemStorageABC"["GraphExecutionState"],
         processor: "InvocationProcessorABC",
+        restoration: "RestorationServices",
+        configuration: "InvokeAISettings",
     ):
-        self.generate = generate
+        self.model_manager = model_manager
         self.events = events
+        self.logger = logger
+        self.latents = latents
         self.images = images
         self.queue = queue
+        self.graph_library = graph_library
         self.graph_execution_manager = graph_execution_manager
         self.processor = processor
+        self.restoration = restoration
+        self.configuration = configuration

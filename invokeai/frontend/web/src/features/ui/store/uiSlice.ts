@@ -1,65 +1,53 @@
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { createSlice } from '@reduxjs/toolkit';
-import { InvokeTabName, tabMap } from './tabMap';
+import { initialImageChanged } from 'features/parameters/store/generationSlice';
+import { setActiveTabReducer } from './extraReducers';
+import { InvokeTabName } from './tabMap';
 import { AddNewModelType, UIState } from './uiTypes';
+import { SchedulerParam } from 'features/parameters/store/parameterZodSchemas';
 
-const initialtabsState: UIState = {
+export const initialUIState: UIState = {
   activeTab: 0,
   currentTheme: 'dark',
-  parametersPanelScrollPosition: 0,
-  shouldHoldParametersPanelOpen: false,
   shouldPinParametersPanel: true,
   shouldShowParametersPanel: true,
-  shouldShowDualDisplay: true,
   shouldShowImageDetails: false,
   shouldUseCanvasBetaLayout: false,
   shouldShowExistingModelsInSearch: false,
   shouldUseSliders: false,
   addNewModelUIOption: null,
+  shouldPinGallery: true,
+  shouldShowGallery: true,
+  shouldHidePreview: false,
+  shouldShowProgressInViewer: true,
+  favoriteSchedulers: [],
 };
-
-const initialState: UIState = initialtabsState;
 
 export const uiSlice = createSlice({
   name: 'ui',
-  initialState,
+  initialState: initialUIState,
   reducers: {
     setActiveTab: (state, action: PayloadAction<number | InvokeTabName>) => {
-      if (typeof action.payload === 'number') {
-        state.activeTab = action.payload;
-      } else {
-        state.activeTab = tabMap.indexOf(action.payload);
-      }
+      setActiveTabReducer(state, action.payload);
     },
     setCurrentTheme: (state, action: PayloadAction<string>) => {
       state.currentTheme = action.payload;
     },
-    setParametersPanelScrollPosition: (
-      state,
-      action: PayloadAction<number>
-    ) => {
-      state.parametersPanelScrollPosition = action.payload;
-    },
     setShouldPinParametersPanel: (state, action: PayloadAction<boolean>) => {
       state.shouldPinParametersPanel = action.payload;
+      state.shouldShowParametersPanel = true;
     },
     setShouldShowParametersPanel: (state, action: PayloadAction<boolean>) => {
       state.shouldShowParametersPanel = action.payload;
-    },
-    setShouldHoldParametersPanelOpen: (
-      state,
-      action: PayloadAction<boolean>
-    ) => {
-      state.shouldHoldParametersPanelOpen = action.payload;
-    },
-    setShouldShowDualDisplay: (state, action: PayloadAction<boolean>) => {
-      state.shouldShowDualDisplay = action.payload;
     },
     setShouldShowImageDetails: (state, action: PayloadAction<boolean>) => {
       state.shouldShowImageDetails = action.payload;
     },
     setShouldUseCanvasBetaLayout: (state, action: PayloadAction<boolean>) => {
       state.shouldUseCanvasBetaLayout = action.payload;
+    },
+    setShouldHidePreview: (state, action: PayloadAction<boolean>) => {
+      state.shouldHidePreview = action.payload;
     },
     setShouldShowExistingModelsInSearch: (
       state,
@@ -73,22 +61,72 @@ export const uiSlice = createSlice({
     setAddNewModelUIOption: (state, action: PayloadAction<AddNewModelType>) => {
       state.addNewModelUIOption = action.payload;
     },
+    setShouldShowGallery: (state, action: PayloadAction<boolean>) => {
+      state.shouldShowGallery = action.payload;
+    },
+    togglePinGalleryPanel: (state) => {
+      state.shouldPinGallery = !state.shouldPinGallery;
+      if (!state.shouldPinGallery) {
+        state.shouldShowGallery = true;
+      }
+    },
+    togglePinParametersPanel: (state) => {
+      state.shouldPinParametersPanel = !state.shouldPinParametersPanel;
+      if (!state.shouldPinParametersPanel) {
+        state.shouldShowParametersPanel = true;
+      }
+    },
+    toggleParametersPanel: (state) => {
+      state.shouldShowParametersPanel = !state.shouldShowParametersPanel;
+    },
+    toggleGalleryPanel: (state) => {
+      state.shouldShowGallery = !state.shouldShowGallery;
+    },
+    togglePanels: (state) => {
+      if (state.shouldShowGallery || state.shouldShowParametersPanel) {
+        state.shouldShowGallery = false;
+        state.shouldShowParametersPanel = false;
+      } else {
+        state.shouldShowGallery = true;
+        state.shouldShowParametersPanel = true;
+      }
+    },
+    setShouldShowProgressInViewer: (state, action: PayloadAction<boolean>) => {
+      state.shouldShowProgressInViewer = action.payload;
+    },
+    favoriteSchedulersChanged: (
+      state,
+      action: PayloadAction<SchedulerParam[]>
+    ) => {
+      state.favoriteSchedulers = action.payload;
+    },
+  },
+  extraReducers(builder) {
+    builder.addCase(initialImageChanged, (state) => {
+      setActiveTabReducer(state, 'img2img');
+    });
   },
 });
 
 export const {
   setActiveTab,
   setCurrentTheme,
-  setParametersPanelScrollPosition,
-  setShouldHoldParametersPanelOpen,
   setShouldPinParametersPanel,
   setShouldShowParametersPanel,
-  setShouldShowDualDisplay,
   setShouldShowImageDetails,
   setShouldUseCanvasBetaLayout,
   setShouldShowExistingModelsInSearch,
   setShouldUseSliders,
   setAddNewModelUIOption,
+  setShouldHidePreview,
+  setShouldShowGallery,
+  togglePanels,
+  togglePinGalleryPanel,
+  togglePinParametersPanel,
+  toggleParametersPanel,
+  toggleGalleryPanel,
+  setShouldShowProgressInViewer,
+  favoriteSchedulersChanged,
 } = uiSlice.actions;
 
 export default uiSlice.reducer;

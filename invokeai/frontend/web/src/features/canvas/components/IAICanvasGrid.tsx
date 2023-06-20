@@ -1,10 +1,11 @@
 // Grid drawing adapted from https://longviewcoder.com/2021/12/08/konva-a-better-grid/
 
-import { useColorMode } from '@chakra-ui/react';
+import { useToken } from '@chakra-ui/react';
 import { createSelector } from '@reduxjs/toolkit';
-import { useAppSelector } from 'app/storeHooks';
+import { RootState } from 'app/store/store';
+import { useAppSelector } from 'app/store/storeHooks';
 import { canvasSelector } from 'features/canvas/store/canvasSelectors';
-import { isEqual, range } from 'lodash';
+import { isEqual, range } from 'lodash-es';
 
 import { ReactNode, useCallback, useLayoutEffect, useState } from 'react';
 import { Group, Line as KonvaLine } from 'react-konva';
@@ -22,17 +23,15 @@ const selector = createSelector(
   }
 );
 
-const gridLinesColor = {
-  dark: 'rgba(255, 255, 255, 0.2)',
-  green: 'rgba(255, 255, 255, 0.2)',
-  light: 'rgba(0, 0, 0, 0.2)',
-};
-
 const IAICanvasGrid = () => {
-  const { colorMode } = useColorMode();
+  const currentTheme = useAppSelector(
+    (state: RootState) => state.ui.currentTheme
+  );
   const { stageScale, stageCoordinates, stageDimensions } =
     useAppSelector(selector);
   const [gridLines, setGridLines] = useState<ReactNode[]>([]);
+
+  const [gridLineColor] = useToken('colors', ['gridLineColor']);
 
   const unscale = useCallback(
     (value: number) => {
@@ -42,8 +41,6 @@ const IAICanvasGrid = () => {
   );
 
   useLayoutEffect(() => {
-    const gridLineColor = gridLinesColor[colorMode];
-
     const { width, height } = stageDimensions;
     const { x, y } = stageCoordinates;
 
@@ -108,7 +105,14 @@ const IAICanvasGrid = () => {
     ));
 
     setGridLines(xLines.concat(yLines));
-  }, [stageScale, stageCoordinates, stageDimensions, colorMode, unscale]);
+  }, [
+    stageScale,
+    stageCoordinates,
+    stageDimensions,
+    currentTheme,
+    unscale,
+    gridLineColor,
+  ]);
 
   return <Group>{gridLines}</Group>;
 };

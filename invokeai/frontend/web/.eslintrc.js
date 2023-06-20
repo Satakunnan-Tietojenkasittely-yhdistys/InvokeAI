@@ -30,8 +30,12 @@ module.exports = {
     radix: 'error',
     'space-before-blocks': 'error',
     'import/prefer-default-export': 'off',
-    '@typescript-eslint/no-unused-vars': ['warn', { varsIgnorePattern: '_+' }],
+    '@typescript-eslint/no-unused-vars': [
+      'warn',
+      { varsIgnorePattern: '^_', argsIgnorePattern: '^_' },
+    ],
     'prettier/prettier': ['error', { endOfLine: 'auto' }],
+    '@typescript-eslint/ban-ts-comment': 'warn',
   },
   settings: {
     react: {

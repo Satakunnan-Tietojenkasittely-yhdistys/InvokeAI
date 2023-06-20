@@ -1,8 +1,10 @@
 import { Progress } from '@chakra-ui/react';
 import { createSelector } from '@reduxjs/toolkit';
-import { useAppSelector } from 'app/storeHooks';
+import { useAppSelector } from 'app/store/storeHooks';
 import { SystemState } from 'features/system/store/systemSlice';
-import { isEqual } from 'lodash';
+import { isEqual } from 'lodash-es';
+import { memo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { systemSelector } from '../store/systemSelectors';
 
 const progressBarSelector = createSelector(
@@ -21,6 +23,7 @@ const progressBarSelector = createSelector(
 );
 
 const ProgressBar = () => {
+  const { t } = useTranslation();
   const { isProcessing, currentStep, totalSteps, currentStatusHasSteps } =
     useAppSelector(progressBarSelector);
 
@@ -29,10 +32,11 @@ const ProgressBar = () => {
   return (
     <Progress
       value={value}
+      aria-label={t('accessibility.invokeProgressBar')}
       isIndeterminate={isProcessing && !currentStatusHasSteps}
-      className="progress-bar"
+      height="full"
     />
   );
 };
 
-export default ProgressBar;
+export default memo(ProgressBar);

@@ -1,54 +1,83 @@
 # Copyright (c) 2022 Kyle Schouviller (https://github.com/kyle0654)
 
-from datetime import datetime, timezone
-from typing import Literal, Optional
+import io
+from typing import Literal, Optional, Union
 
 import numpy
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageFilter, ImageOps, ImageChops
 from pydantic import BaseModel, Field
 
-from ..services.image_storage import ImageType
-from ..services.invocation_services import InvocationServices
-from .baseinvocation import BaseInvocation, BaseInvocationOutput, InvocationContext
+from ..models.image import ImageCategory, ImageField, ResourceOrigin
+from .baseinvocation import (
+    BaseInvocation,
+    BaseInvocationOutput,
+    InvocationContext,
+    InvocationConfig,
+)
 
 
-class ImageField(BaseModel):
-    """An image field used for passing image objects between invocations"""
+class PILInvocationConfig(BaseModel):
+    """Helper class to provide all PIL invocations with additional config"""
 
-    image_type: str = Field(
-        default=ImageType.RESULT, description="The type of the image"
-    )
-    image_name: Optional[str] = Field(default=None, description="The name of the image")
+    class Config(InvocationConfig):
+        schema_extra = {
+            "ui": {
+                "tags": ["PIL", "image"],
+            },
+        }
 
 
 class ImageOutput(BaseInvocationOutput):
     """Base class for invocations that output an image"""
-    #fmt: off
-    type: Literal["image"] = "image"
+
+    # fmt: off
+    type: Literal["image_output"] = "image_output"
     image:      ImageField = Field(default=None, description="The output image")
-    #fmt: on
+    width:             int = Field(description="The width of the image in pixels")
+    height:            int = Field(description="The height of the image in pixels")
+    # fmt: on
+
+    class Config:
+        schema_extra = {"required": ["type", "image", "width", "height"]}
+
 
 class MaskOutput(BaseInvocationOutput):
     """Base class for invocations that output a mask"""
-    #fmt: off
+
+    # fmt: off
     type: Literal["mask"] = "mask"
     mask:      ImageField = Field(default=None, description="The output mask")
-    #fomt: on
+    width:            int = Field(description="The width of the mask in pixels")
+    height:           int = Field(description="The height of the mask in pixels")
+    # fmt: on
 
-# TODO: this isn't really necessary anymore
+    class Config:
+        schema_extra = {
+            "required": [
+                "type",
+                "mask",
+            ]
+        }
+
+
 class LoadImageInvocation(BaseInvocation):
-    """Load an image from a filename and provide it as output."""
-    #fmt: off
+    """Load an image and provide it as output."""
+
+    # fmt: off
     type: Literal["load_image"] = "load_image"
 
     # Inputs
-    image_type: ImageType = Field(description="The type of the image")
-    image_name:       str = Field(description="The name of the image")
-    #fmt: on
-
+    image: Union[ImageField, None] = Field(
+        default=None, description="The image to load"
+    )
+    # fmt: on
     def invoke(self, context: InvocationContext) -> ImageOutput:
+        image = context.services.images.get_pil_image(self.image.image_name)
+
         return ImageOutput(
-            image=ImageField(image_type=self.image_type, image_name=self.image_name)
+            image=ImageField(image_name=self.image.image_name),
+            width=image.width,
+            height=image.height,
         )
 
 
@@ -58,82 +87,84 @@ class ShowImageInvocation(BaseInvocation):
     type: Literal["show_image"] = "show_image"
 
     # Inputs
-    image: ImageField = Field(default=None, description="The image to show")
+    image: Union[ImageField, None] = Field(
+        default=None, description="The image to show"
+    )
 
     def invoke(self, context: InvocationContext) -> ImageOutput:
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
-        )
+        image = context.services.images.get_pil_image(self.image.image_name)
         if image:
             image.show()
 
         # TODO: how to handle failure?
 
         return ImageOutput(
-            image=ImageField(
-                image_type=self.image.image_type, image_name=self.image.image_name
-            )
+            image=ImageField(image_name=self.image.image_name),
+            width=image.width,
+            height=image.height,
         )
 
 
-class CropImageInvocation(BaseInvocation):
+class ImageCropInvocation(BaseInvocation, PILInvocationConfig):
     """Crops an image to a specified box. The box can be outside of the image."""
-    #fmt: off
-    type: Literal["crop"] = "crop"
+
+    # fmt: off
+    type: Literal["img_crop"] = "img_crop"
 
     # Inputs
-    image: ImageField = Field(default=None, description="The image to crop")
+    image: Union[ImageField, None]  = Field(default=None, description="The image to crop")
     x:      int = Field(default=0, description="The left x coordinate of the crop rectangle")
     y:      int = Field(default=0, description="The top y coordinate of the crop rectangle")
     width:  int = Field(default=512, gt=0, description="The width of the crop rectangle")
     height: int = Field(default=512, gt=0, description="The height of the crop rectangle")
-    #fmt: on
+    # fmt: on
 
     def invoke(self, context: InvocationContext) -> ImageOutput:
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
-        )
+        image = context.services.images.get_pil_image(self.image.image_name)
 
         image_crop = Image.new(
             mode="RGBA", size=(self.width, self.height), color=(0, 0, 0, 0)
         )
         image_crop.paste(image, (-self.x, -self.y))
 
-        image_type = ImageType.INTERMEDIATE
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        image_dto = context.services.images.create(
+            image=image_crop,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
         )
-        context.services.images.save(image_type, image_name, image_crop)
+
         return ImageOutput(
-            image=ImageField(image_type=image_type, image_name=image_name)
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
         )
 
 
-class PasteImageInvocation(BaseInvocation):
+class ImagePasteInvocation(BaseInvocation, PILInvocationConfig):
     """Pastes an image into another image."""
-    #fmt: off
-    type: Literal["paste"] = "paste"
+
+    # fmt: off
+    type: Literal["img_paste"] = "img_paste"
 
     # Inputs
-    base_image:     ImageField = Field(default=None, description="The base image")
-    image:          ImageField = Field(default=None, description="The image to paste")
+    base_image:     Union[ImageField, None]  = Field(default=None, description="The base image")
+    image:          Union[ImageField, None]  = Field(default=None, description="The image to paste")
     mask: Optional[ImageField] = Field(default=None, description="The mask to use when pasting")
     x:                     int = Field(default=0, description="The left x coordinate at which to paste the image")
     y:                     int = Field(default=0, description="The top y coordinate at which to paste the image")
-    #fmt: on
+    # fmt: on
 
     def invoke(self, context: InvocationContext) -> ImageOutput:
-        base_image = context.services.images.get(
-            self.base_image.image_type, self.base_image.image_name
-        )
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
-        )
+        base_image = context.services.images.get_pil_image(self.base_image.image_name)
+        image = context.services.images.get_pil_image(self.image.image_name)
         mask = (
             None
             if self.mask is None
             else ImageOps.invert(
-                services.images.get(self.mask.image_type, self.mask.image_name)
+                context.services.images.get_pil_image(self.mask.image_name)
             )
         )
         # TODO: probably shouldn't invert mask here... should user be required to do it?
@@ -149,59 +180,173 @@ class PasteImageInvocation(BaseInvocation):
         new_image.paste(base_image, (abs(min_x), abs(min_y)))
         new_image.paste(image, (max(0, self.x), max(0, self.y)), mask=mask)
 
-        image_type = ImageType.RESULT
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        image_dto = context.services.images.create(
+            image=new_image,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
         )
-        context.services.images.save(image_type, image_name, new_image)
+
         return ImageOutput(
-            image=ImageField(image_type=image_type, image_name=image_name)
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
         )
 
 
-class MaskFromAlphaInvocation(BaseInvocation):
+class MaskFromAlphaInvocation(BaseInvocation, PILInvocationConfig):
     """Extracts the alpha channel of an image as a mask."""
-    #fmt: off
+
+    # fmt: off
     type: Literal["tomask"] = "tomask"
 
     # Inputs
-    image: ImageField = Field(default=None, description="The image to create the mask from")
+    image: Union[ImageField, None]  = Field(default=None, description="The image to create the mask from")
     invert:      bool = Field(default=False, description="Whether or not to invert the mask")
-    #fmt: on
+    # fmt: on
 
     def invoke(self, context: InvocationContext) -> MaskOutput:
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
-        )
+        image = context.services.images.get_pil_image(self.image.image_name)
 
         image_mask = image.split()[-1]
         if self.invert:
             image_mask = ImageOps.invert(image_mask)
 
-        image_type = ImageType.INTERMEDIATE
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        image_dto = context.services.images.create(
+            image=image_mask,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.MASK,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
         )
-        context.services.images.save(image_type, image_name, image_mask)
-        return MaskOutput(mask=ImageField(image_type=image_type, image_name=image_name))
+
+        return MaskOutput(
+            mask=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
+        )
 
 
-class BlurInvocation(BaseInvocation):
-    """Blurs an image"""
+class ImageMultiplyInvocation(BaseInvocation, PILInvocationConfig):
+    """Multiplies two images together using `PIL.ImageChops.multiply()`."""
 
-    #fmt: off
-    type: Literal["blur"] = "blur"
+    # fmt: off
+    type: Literal["img_mul"] = "img_mul"
 
     # Inputs
-    image: ImageField = Field(default=None, description="The image to blur")
+    image1: Union[ImageField, None]  = Field(default=None, description="The first image to multiply")
+    image2: Union[ImageField, None]  = Field(default=None, description="The second image to multiply")
+    # fmt: on
+
+    def invoke(self, context: InvocationContext) -> ImageOutput:
+        image1 = context.services.images.get_pil_image(self.image1.image_name)
+        image2 = context.services.images.get_pil_image(self.image2.image_name)
+
+        multiply_image = ImageChops.multiply(image1, image2)
+
+        image_dto = context.services.images.create(
+            image=multiply_image,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
+        )
+
+        return ImageOutput(
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
+        )
+
+
+IMAGE_CHANNELS = Literal["A", "R", "G", "B"]
+
+
+class ImageChannelInvocation(BaseInvocation, PILInvocationConfig):
+    """Gets a channel from an image."""
+
+    # fmt: off
+    type: Literal["img_chan"] = "img_chan"
+
+    # Inputs
+    image: Union[ImageField, None]  = Field(default=None, description="The image to get the channel from")
+    channel: IMAGE_CHANNELS  = Field(default="A", description="The channel to get")
+    # fmt: on
+
+    def invoke(self, context: InvocationContext) -> ImageOutput:
+        image = context.services.images.get_pil_image(self.image.image_name)
+
+        channel_image = image.getchannel(self.channel)
+
+        image_dto = context.services.images.create(
+            image=channel_image,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
+        )
+
+        return ImageOutput(
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
+        )
+
+
+IMAGE_MODES = Literal["L", "RGB", "RGBA", "CMYK", "YCbCr", "LAB", "HSV", "I", "F"]
+
+
+class ImageConvertInvocation(BaseInvocation, PILInvocationConfig):
+    """Converts an image to a different mode."""
+
+    # fmt: off
+    type: Literal["img_conv"] = "img_conv"
+
+    # Inputs
+    image: Union[ImageField, None]  = Field(default=None, description="The image to convert")
+    mode: IMAGE_MODES  = Field(default="L", description="The mode to convert to")
+    # fmt: on
+
+    def invoke(self, context: InvocationContext) -> ImageOutput:
+        image = context.services.images.get_pil_image(self.image.image_name)
+
+        converted_image = image.convert(self.mode)
+
+        image_dto = context.services.images.create(
+            image=converted_image,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
+        )
+
+        return ImageOutput(
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
+        )
+
+
+class ImageBlurInvocation(BaseInvocation, PILInvocationConfig):
+    """Blurs an image"""
+
+    # fmt: off
+    type: Literal["img_blur"] = "img_blur"
+
+    # Inputs
+    image: Union[ImageField, None]  = Field(default=None, description="The image to blur")
     radius:     float = Field(default=8.0, ge=0, description="The blur radius")
     blur_type: Literal["gaussian", "box"] = Field(default="gaussian", description="The type of blur")
-    #fmt: on
-    
+    # fmt: on
+
     def invoke(self, context: InvocationContext) -> ImageOutput:
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
-        )
+        image = context.services.images.get_pil_image(self.image.image_name)
 
         blur = (
             ImageFilter.GaussianBlur(self.radius)
@@ -210,62 +355,171 @@ class BlurInvocation(BaseInvocation):
         )
         blur_image = image.filter(blur)
 
-        image_type = ImageType.INTERMEDIATE
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        image_dto = context.services.images.create(
+            image=blur_image,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
         )
-        context.services.images.save(image_type, image_name, blur_image)
+
         return ImageOutput(
-            image=ImageField(image_type=image_type, image_name=image_name)
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
         )
 
 
-class LerpInvocation(BaseInvocation):
-    """Linear interpolation of all pixels of an image"""
-    #fmt: off
-    type: Literal["lerp"] = "lerp"
+PIL_RESAMPLING_MODES = Literal[
+    "nearest",
+    "box",
+    "bilinear",
+    "hamming",
+    "bicubic",
+    "lanczos",
+]
+
+
+PIL_RESAMPLING_MAP = {
+    "nearest": Image.Resampling.NEAREST,
+    "box": Image.Resampling.BOX,
+    "bilinear": Image.Resampling.BILINEAR,
+    "hamming": Image.Resampling.HAMMING,
+    "bicubic": Image.Resampling.BICUBIC,
+    "lanczos": Image.Resampling.LANCZOS,
+}
+
+
+class ImageResizeInvocation(BaseInvocation, PILInvocationConfig):
+    """Resizes an image to specific dimensions"""
+
+    # fmt: off
+    type: Literal["img_resize"] = "img_resize"
 
     # Inputs
-    image: ImageField = Field(default=None, description="The image to lerp")
-    min: int = Field(default=0, ge=0, le=255, description="The minimum output value")
-    max: int = Field(default=255, ge=0, le=255, description="The maximum output value")
-    #fmt: on
+    image: Union[ImageField, None]  = Field(default=None, description="The image to resize")
+    width:                         int = Field(ge=64, multiple_of=8, description="The width to resize to (px)")
+    height:                        int = Field(ge=64, multiple_of=8, description="The height to resize to (px)")
+    resample_mode:  PIL_RESAMPLING_MODES = Field(default="bicubic", description="The resampling mode")
+    # fmt: on
 
     def invoke(self, context: InvocationContext) -> ImageOutput:
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
+        image = context.services.images.get_pil_image(self.image.image_name)
+
+        resample_mode = PIL_RESAMPLING_MAP[self.resample_mode]
+
+        resize_image = image.resize(
+            (self.width, self.height),
+            resample=resample_mode,
         )
+
+        image_dto = context.services.images.create(
+            image=resize_image,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
+        )
+
+        return ImageOutput(
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
+        )
+
+
+class ImageScaleInvocation(BaseInvocation, PILInvocationConfig):
+    """Scales an image by a factor"""
+
+    # fmt: off
+    type: Literal["img_scale"] = "img_scale"
+
+    # Inputs
+    image:       Union[ImageField, None] = Field(default=None, description="The image to scale")
+    scale_factor:                  float = Field(gt=0, description="The factor by which to scale the image")
+    resample_mode:  PIL_RESAMPLING_MODES = Field(default="bicubic", description="The resampling mode")
+    # fmt: on
+
+    def invoke(self, context: InvocationContext) -> ImageOutput:
+        image = context.services.images.get_pil_image(self.image.image_name)
+
+        resample_mode = PIL_RESAMPLING_MAP[self.resample_mode]
+        width = int(image.width * self.scale_factor)
+        height = int(image.height * self.scale_factor)
+
+        resize_image = image.resize(
+            (width, height),
+            resample=resample_mode,
+        )
+
+        image_dto = context.services.images.create(
+            image=resize_image,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
+        )
+
+        return ImageOutput(
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
+        )
+
+
+class ImageLerpInvocation(BaseInvocation, PILInvocationConfig):
+    """Linear interpolation of all pixels of an image"""
+
+    # fmt: off
+    type: Literal["img_lerp"] = "img_lerp"
+
+    # Inputs
+    image: Union[ImageField, None]  = Field(default=None, description="The image to lerp")
+    min: int = Field(default=0, ge=0, le=255, description="The minimum output value")
+    max: int = Field(default=255, ge=0, le=255, description="The maximum output value")
+    # fmt: on
+
+    def invoke(self, context: InvocationContext) -> ImageOutput:
+        image = context.services.images.get_pil_image(self.image.image_name)
 
         image_arr = numpy.asarray(image, dtype=numpy.float32) / 255
         image_arr = image_arr * (self.max - self.min) + self.max
 
         lerp_image = Image.fromarray(numpy.uint8(image_arr))
 
-        image_type = ImageType.INTERMEDIATE
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        image_dto = context.services.images.create(
+            image=lerp_image,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
         )
-        context.services.images.save(image_type, image_name, lerp_image)
+
         return ImageOutput(
-            image=ImageField(image_type=image_type, image_name=image_name)
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
         )
 
 
-class InverseLerpInvocation(BaseInvocation):
+class ImageInverseLerpInvocation(BaseInvocation, PILInvocationConfig):
     """Inverse linear interpolation of all pixels of an image"""
-    #fmt: off
-    type: Literal["ilerp"] = "ilerp"
+
+    # fmt: off
+    type: Literal["img_ilerp"] = "img_ilerp"
 
     # Inputs
-    image: ImageField = Field(default=None, description="The image to lerp")
+    image: Union[ImageField, None]  = Field(default=None, description="The image to lerp")
     min: int = Field(default=0, ge=0, le=255, description="The minimum input value")
     max: int = Field(default=255, ge=0, le=255, description="The maximum input value")
-    #fmt: on
-    
+    # fmt: on
+
     def invoke(self, context: InvocationContext) -> ImageOutput:
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
-        )
+        image = context.services.images.get_pil_image(self.image.image_name)
 
         image_arr = numpy.asarray(image, dtype=numpy.float32)
         image_arr = (
@@ -277,11 +531,17 @@ class InverseLerpInvocation(BaseInvocation):
 
         ilerp_image = Image.fromarray(numpy.uint8(image_arr))
 
-        image_type = ImageType.INTERMEDIATE
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        image_dto = context.services.images.create(
+            image=ilerp_image,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
         )
-        context.services.images.save(image_type, image_name, ilerp_image)
+
         return ImageOutput(
-            image=ImageField(image_type=image_type, image_name=image_name)
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
         )

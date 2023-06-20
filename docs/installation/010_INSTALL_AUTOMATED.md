@@ -89,7 +89,7 @@ experimental versions later.
          sudo apt update
          sudo apt install -y software-properties-common
          sudo add-apt-repository -y ppa:deadsnakes/ppa
-         sudo apt install python3.10 python3-pip python3.10-venv
+         sudo apt install -y python3.10 python3-pip python3.10-venv
          sudo update-alternatives --install /usr/local/bin/python python /usr/bin/python3.10 3
          ```
 
@@ -417,7 +417,7 @@ Then type the following commands:
 
 === "AMD System"
     ```bash
-    pip install torch torchvision --force-reinstall --extra-index-url https://download.pytorch.org/whl/rocm5.2
+    pip install torch torchvision --force-reinstall --extra-index-url https://download.pytorch.org/whl/rocm5.4.2
     ```
 
 ### Corrupted configuration file

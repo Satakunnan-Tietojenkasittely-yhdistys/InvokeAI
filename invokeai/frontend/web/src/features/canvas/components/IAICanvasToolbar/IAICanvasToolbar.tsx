@@ -1,8 +1,7 @@
-import { ButtonGroup } from '@chakra-ui/react';
+import { Box, ButtonGroup, Flex } from '@chakra-ui/react';
 import { createSelector } from '@reduxjs/toolkit';
-import { useAppDispatch, useAppSelector } from 'app/storeHooks';
+import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
 import IAIIconButton from 'common/components/IAIIconButton';
-import IAISelect from 'common/components/IAISelect';
 import useImageUploader from 'common/hooks/useImageUploader';
 import { useSingleAndDoubleClick } from 'common/hooks/useSingleAndDoubleClick';
 import {
@@ -21,12 +20,17 @@ import {
   CanvasLayer,
   LAYER_NAMES_DICT,
 } from 'features/canvas/store/canvasTypes';
-import { mergeAndUploadCanvas } from 'features/canvas/store/thunks/mergeAndUploadCanvas';
 import { getCanvasBaseLayer } from 'features/canvas/util/konvaInstanceProvider';
 import { systemSelector } from 'features/system/store/systemSelectors';
-import { isEqual } from 'lodash';
+import { isEqual } from 'lodash-es';
 
-import { ChangeEvent } from 'react';
+import IAIMantineSelect from 'common/components/IAIMantineSelect';
+import {
+  canvasCopiedToClipboard,
+  canvasDownloadedAsImage,
+  canvasMerged,
+  canvasSavedToGallery,
+} from 'features/canvas/store/actions';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useTranslation } from 'react-i18next';
 import {
@@ -68,16 +72,10 @@ export const selector = createSelector(
   }
 );
 
-const IAICanvasOutpaintingControls = () => {
+const IAICanvasToolbar = () => {
   const dispatch = useAppDispatch();
-  const {
-    isProcessing,
-    isStaging,
-    isMaskEnabled,
-    layer,
-    tool,
-    shouldCropToBoundingBoxOnSave,
-  } = useAppSelector(selector);
+  const { isProcessing, isStaging, isMaskEnabled, layer, tool } =
+    useAppSelector(selector);
   const canvasBaseLayer = getCanvasBaseLayer();
 
   const { t } = useTranslation();
@@ -183,46 +181,23 @@ const IAICanvasOutpaintingControls = () => {
   };
 
   const handleMergeVisible = () => {
-    dispatch(
-      mergeAndUploadCanvas({
-        cropVisible: false,
-        shouldSetAsInitialImage: true,
-      })
-    );
+    dispatch(canvasMerged());
   };
 
   const handleSaveToGallery = () => {
-    dispatch(
-      mergeAndUploadCanvas({
-        cropVisible: shouldCropToBoundingBoxOnSave ? false : true,
-        cropToBoundingBox: shouldCropToBoundingBoxOnSave,
-        shouldSaveToGallery: true,
-      })
-    );
+    dispatch(canvasSavedToGallery());
   };
 
   const handleCopyImageToClipboard = () => {
-    dispatch(
-      mergeAndUploadCanvas({
-        cropVisible: shouldCropToBoundingBoxOnSave ? false : true,
-        cropToBoundingBox: shouldCropToBoundingBoxOnSave,
-        shouldCopy: true,
-      })
-    );
+    dispatch(canvasCopiedToClipboard());
   };
 
   const handleDownloadAsImage = () => {
-    dispatch(
-      mergeAndUploadCanvas({
-        cropVisible: shouldCropToBoundingBoxOnSave ? false : true,
-        cropToBoundingBox: shouldCropToBoundingBoxOnSave,
-        shouldDownload: true,
-      })
-    );
+    dispatch(canvasDownloadedAsImage());
   };
 
-  const handleChangeLayer = (e: ChangeEvent<HTMLSelectElement>) => {
-    const newLayer = e.target.value as CanvasLayer;
+  const handleChangeLayer = (v: string) => {
+    const newLayer = v as CanvasLayer;
     dispatch(setLayer(newLayer));
     if (newLayer === 'mask' && !isMaskEnabled) {
       dispatch(setIsMaskEnabled(true));
@@ -230,15 +205,22 @@ const IAICanvasOutpaintingControls = () => {
   };
 
   return (
-    <div className="inpainting-settings">
-      <IAISelect
-        tooltip={`${t('unifiedCanvas.layer')} (Q)`}
-        tooltipProps={{ hasArrow: true, placement: 'top' }}
-        value={layer}
-        validValues={LAYER_NAMES_DICT}
-        onChange={handleChangeLayer}
-        isDisabled={isStaging}
-      />
+    <Flex
+      sx={{
+        alignItems: 'center',
+        gap: 2,
+        flexWrap: 'wrap',
+      }}
+    >
+      <Box w={24}>
+        <IAIMantineSelect
+          tooltip={`${t('unifiedCanvas.layer')} (Q)`}
+          value={layer}
+          data={LAYER_NAMES_DICT}
+          onChange={handleChangeLayer}
+          disabled={isStaging}
+        />
+      </Box>
 
       <IAICanvasMaskOptions />
       <IAICanvasToolChooserOptions />
@@ -248,7 +230,7 @@ const IAICanvasOutpaintingControls = () => {
           aria-label={`${t('unifiedCanvas.move')} (V)`}
           tooltip={`${t('unifiedCanvas.move')} (V)`}
           icon={<FaArrowsAlt />}
-          data-selected={tool === 'move' || isStaging}
+          isChecked={tool === 'move' || isStaging}
           onClick={handleSelectMoveTool}
         />
         <IAIIconButton
@@ -307,15 +289,15 @@ const IAICanvasOutpaintingControls = () => {
           tooltip={`${t('unifiedCanvas.clearCanvas')}`}
           icon={<FaTrash />}
           onClick={handleResetCanvas}
-          style={{ backgroundColor: 'var(--btn-delete-image)' }}
+          colorScheme="error"
           isDisabled={isStaging}
         />
       </ButtonGroup>
       <ButtonGroup isAttached>
         <IAICanvasSettingsButtonPopover />
       </ButtonGroup>
-    </div>
+    </Flex>
   );
 };
 
-export default IAICanvasOutpaintingControls;
+export default IAICanvasToolbar;

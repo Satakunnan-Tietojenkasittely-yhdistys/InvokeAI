@@ -5,11 +5,12 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogOverlay,
-  Button,
   forwardRef,
   useDisclosure,
 } from '@chakra-ui/react';
-import { cloneElement, ReactElement, ReactNode, useRef } from 'react';
+import { cloneElement, memo, ReactElement, ReactNode, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import IAIButton from './IAIButton';
 
 type Props = {
   acceptButtonText?: string;
@@ -22,10 +23,12 @@ type Props = {
 };
 
 const IAIAlertDialog = forwardRef((props: Props, ref) => {
+  const { t } = useTranslation();
+
   const {
-    acceptButtonText = 'Accept',
+    acceptButtonText = t('common.accept'),
     acceptCallback,
-    cancelButtonText = 'Cancel',
+    cancelButtonText = t('common.cancel'),
     cancelCallback,
     children,
     title,
@@ -56,9 +59,10 @@ const IAIAlertDialog = forwardRef((props: Props, ref) => {
         isOpen={isOpen}
         leastDestructiveRef={cancelRef}
         onClose={onClose}
+        isCentered
       >
         <AlertDialogOverlay>
-          <AlertDialogContent className="modal">
+          <AlertDialogContent>
             <AlertDialogHeader fontSize="lg" fontWeight="bold">
               {title}
             </AlertDialogHeader>
@@ -66,16 +70,12 @@ const IAIAlertDialog = forwardRef((props: Props, ref) => {
             <AlertDialogBody>{children}</AlertDialogBody>
 
             <AlertDialogFooter>
-              <Button
-                ref={cancelRef}
-                onClick={handleCancel}
-                className="modal-close-btn"
-              >
+              <IAIButton ref={cancelRef} onClick={handleCancel}>
                 {cancelButtonText}
-              </Button>
-              <Button colorScheme="red" onClick={handleAccept} ml={3}>
+              </IAIButton>
+              <IAIButton colorScheme="error" onClick={handleAccept} ml={3}>
                 {acceptButtonText}
-              </Button>
+              </IAIButton>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialogOverlay>
@@ -83,4 +83,4 @@ const IAIAlertDialog = forwardRef((props: Props, ref) => {
     </>
   );
 });
-export default IAIAlertDialog;
+export default memo(IAIAlertDialog);

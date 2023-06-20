@@ -33,6 +33,8 @@
 
 </div>
 
+_**Note: The UI is not fully functional on `main`. If you need a stable UI based on `main`, use the `pre-nodes` tag while we [migrate to a new backend](https://github.com/invoke-ai/InvokeAI/discussions/3246).**_
+
 InvokeAI is a leading creative engine built to empower professionals and enthusiasts alike. Generate and create stunning visual media using the latest AI-driven technologies. InvokeAI offers an industry leading Web Interface, interactive Command Line Interface, and also serves as the foundation for multiple commercial products.
 
 **Quick links**: [[How to Install](https://invoke-ai.github.io/InvokeAI/#installation)] [<a href="https://discord.gg/ZmtBAhwWhy">Discord Server</a>] [<a href="https://invoke-ai.github.io/InvokeAI/">Documentation and Tutorials</a>] [<a href="https://github.com/invoke-ai/InvokeAI/">Code and Downloads</a>] [<a href="https://github.com/invoke-ai/InvokeAI/issues">Bug Reports</a>] [<a href="https://github.com/invoke-ai/InvokeAI/discussions">Discussion, Ideas & Q&A</a>]
@@ -40,6 +42,23 @@ InvokeAI is a leading creative engine built to empower professionals and enthusi
 _Note: InvokeAI is rapidly evolving. Please use the
 [Issues](https://github.com/invoke-ai/InvokeAI/issues) tab to report bugs and make feature
 requests. Be sure to use the provided templates. They will help us diagnose issues faster._
+
+## FOR DEVELOPERS - MIGRATING TO THE 3.0.0 MODELS FORMAT
+
+The models directory and models.yaml have changed. To migrate to the
+new layout, please follow this recipe:
+
+1. Run `python scripts/migrate_models_to_3.0.py <path_to_root_directory>
+
+2. This will create a new models directory named `models-3.0` and a
+   new config directory named `models.yaml-3.0`, both in the current
+   working directory. If you prefer to name them something else, pass
+   the `--dest-directory` and/or `--dest-yaml` arguments.
+
+3. Check that the new models directory and yaml file look ok.
+
+4. Replace the existing directory and file, keeping backup copies just in
+case.
 
 <div align="center">
 
@@ -84,7 +103,7 @@ installing lots of models.
 
 6. Wait while the installer does its thing. After installing the software,
 the installer will launch a script that lets you configure InvokeAI and
-select a set of starting image generaiton models.
+select a set of starting image generation models.
 
 7. Find the folder that InvokeAI was installed into (it is not the
 same as the unpacked zip file directory!) The default location of this
@@ -139,14 +158,19 @@ not supported.
     _For Windows/Linux with an NVIDIA GPU:_
 
     ```terminal
-    pip install InvokeAI[xformers] --use-pep517 --extra-index-url https://download.pytorch.org/whl/cu117
+    pip install "InvokeAI[xformers]" --use-pep517 --extra-index-url https://download.pytorch.org/whl/cu117
     ```
 
     _For Linux with an AMD GPU:_
 
     ```sh
-    pip install InvokeAI --use-pep517 --extra-index-url https://download.pytorch.org/whl/rocm5.2
+    pip install InvokeAI --use-pep517 --extra-index-url https://download.pytorch.org/whl/rocm5.4.2
     ```
+
+    _For non-GPU systems:_
+    ```terminal
+    pip install InvokeAI --use-pep517 --extra-index-url https://download.pytorch.org/whl/cpu
+    ``` 
 
     _For Macintoshes, either Intel or M1/M2:_
 

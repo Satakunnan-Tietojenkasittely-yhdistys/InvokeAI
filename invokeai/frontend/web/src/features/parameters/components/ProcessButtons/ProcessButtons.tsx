@@ -1,21 +1,17 @@
-import { useAppSelector } from 'app/storeHooks';
-import { activeTabNameSelector } from 'features/ui/store/uiSelectors';
+import { Flex } from '@chakra-ui/react';
 import CancelButton from './CancelButton';
 import InvokeButton from './InvokeButton';
-import LoopbackButton from './Loopback';
 
 /**
  * Buttons to start and cancel image generation.
  */
 const ProcessButtons = () => {
-  const activeTabName = useAppSelector(activeTabNameSelector);
-
   return (
-    <div className="process-buttons">
+    <Flex gap={2}>
       <InvokeButton />
-      {activeTabName === 'img2img' && <LoopbackButton />}
+      {/* {activeTabName === 'img2img' && <LoopbackButton />} */}
       <CancelButton />
-    </div>
+    </Flex>
   );
 };
 

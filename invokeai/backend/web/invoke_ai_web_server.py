@@ -19,6 +19,7 @@ from PIL import Image
 from PIL.Image import Image as ImageType
 from werkzeug.utils import secure_filename
 
+import invokeai.backend.util.logging as logger
 import invokeai.frontend.web.dist as frontend
 
 from .. import Generate
@@ -26,10 +27,9 @@ from ..args import APP_ID, APP_VERSION, Args, calculate_init_img_hash
 from ..generator import infill_methods
 from ..globals import Globals, global_converted_ckpts_dir, global_models_dir
 from ..image_util import PngWriter, retrieve_metadata
-from ..model_management import merge_diffusion_models
+from ...frontend.merge.merge_diffusers import merge_diffusion_models
 from ..prompting import (
     get_prompt_structure,
-    get_tokenizer,
     get_tokens_for_prompt_object,
 )
 from ..stable_diffusion import PipelineIntermediateState
@@ -78,7 +78,6 @@ class InvokeAIWebServer:
         mimetypes.add_type("application/javascript", ".js")
         mimetypes.add_type("text/css", ".css")
         # Socket IO
-        logger = True if args.web_verbose else False
         engineio_logger = True if args.web_verbose else False
         max_http_buffer_size = 10000000
 
@@ -214,7 +213,7 @@ class InvokeAIWebServer:
         self.load_socketio_listeners(self.socketio)
 
         if args.gui:
-            print(">> Launching Invoke AI GUI")
+            logger.info("Launching Invoke AI GUI")
             try:
                 from flaskwebgui import FlaskUI
 
@@ -232,17 +231,17 @@ class InvokeAIWebServer:
                 sys.exit(0)
         else:
             useSSL = args.certfile or args.keyfile
-            print(">> Started Invoke AI Web Server")
+            logger.info("Started Invoke AI Web Server")
             if self.host == "0.0.0.0":
-                print(
+                logger.info(
                     f"Point your browser at http{'s' if useSSL else ''}://localhost:{self.port} or use the host's DNS name or IP address."
                 )
             else:
-                print(
-                    ">> Default host address now 127.0.0.1 (localhost). Use --host 0.0.0.0 to bind any address."
+                logger.info(
+                    "Default host address now 127.0.0.1 (localhost). Use --host 0.0.0.0 to bind any address."
                 )
-                print(
-                    f">> Point your browser at http{'s' if useSSL else ''}://{self.host}:{self.port}"
+                logger.info(
+                    f"Point your browser at http{'s' if useSSL else ''}://{self.host}:{self.port}"
                 )
             if not useSSL:
                 self.socketio.run(app=self.app, host=self.host, port=self.port)
@@ -274,7 +273,7 @@ class InvokeAIWebServer:
         # path for thumbnail images
         self.thumbnail_image_path = os.path.join(self.result_path, "thumbnails/")
         # txt log
-        self.log_path = os.path.join(self.result_path, "invoke_log.txt")
+        self.log_path = os.path.join(self.result_path, "invoke_logger.txt")
         # make all output paths
         [
             os.makedirs(path, exist_ok=True)
@@ -291,7 +290,7 @@ class InvokeAIWebServer:
     def load_socketio_listeners(self, socketio):
         @socketio.on("requestSystemConfig")
         def handle_request_capabilities():
-            print(">> System config requested")
+            logger.info("System config requested")
             config = self.get_system_config()
             config["model_list"] = self.generate.model_manager.list_models()
             config["infill_methods"] = infill_methods()
@@ -331,7 +330,7 @@ class InvokeAIWebServer:
                 if model_name in current_model_list:
                     update = True
 
-                print(f">> Adding New Model: {model_name}")
+                logger.info(f"Adding New Model: {model_name}")
 
                 self.generate.model_manager.add_model(
                     model_name=model_name,
@@ -349,14 +348,14 @@ class InvokeAIWebServer:
                         "update": update,
                     },
                 )
-                print(f">> New Model Added: {model_name}")
+                logger.info(f"New Model Added: {model_name}")
             except Exception as e:
                 self.handle_exceptions(e)
 
         @socketio.on("deleteModel")
         def handle_delete_model(model_name: str):
             try:
-                print(f">> Deleting Model: {model_name}")
+                logger.info(f"Deleting Model: {model_name}")
                 self.generate.model_manager.del_model(model_name)
                 self.generate.model_manager.commit(opt.conf)
                 updated_model_list = self.generate.model_manager.list_models()
@@ -367,14 +366,14 @@ class InvokeAIWebServer:
                         "model_list": updated_model_list,
                     },
                 )
-                print(f">> Model Deleted: {model_name}")
+                logger.info(f"Model Deleted: {model_name}")
             except Exception as e:
                 self.handle_exceptions(e)
 
         @socketio.on("requestModelChange")
         def handle_set_model(model_name: str):
             try:
-                print(f">> Model change requested: {model_name}")
+                logger.info(f"Model change requested: {model_name}")
                 model = self.generate.set_model(model_name)
                 model_list = self.generate.model_manager.list_models()
                 if model is None:
@@ -455,7 +454,7 @@ class InvokeAIWebServer:
                         "update": True,
                     },
                 )
-                print(f">> Model Converted: {model_name}")
+                logger.info(f"Model Converted: {model_name}")
             except Exception as e:
                 self.handle_exceptions(e)
 
@@ -491,7 +490,7 @@ class InvokeAIWebServer:
                 if vae := self.generate.model_manager.config[models_to_merge[0]].get(
                     "vae", None
                 ):
-                    print(f">> Using configured VAE assigned to {models_to_merge[0]}")
+                    logger.info(f"Using configured VAE assigned to {models_to_merge[0]}")
                     merged_model_config.update(vae=vae)
 
                 self.generate.model_manager.import_diffuser_model(
@@ -508,8 +507,8 @@ class InvokeAIWebServer:
                         "update": True,
                     },
                 )
-                print(f">> Models Merged: {models_to_merge}")
-                print(f">> New Model Added: {model_merge_info['merged_model_name']}")
+                logger.info(f"Models Merged: {models_to_merge}")
+                logger.info(f"New Model Added: {model_merge_info['merged_model_name']}")
             except Exception as e:
                 self.handle_exceptions(e)
 
@@ -699,7 +698,7 @@ class InvokeAIWebServer:
                             }
                         )
                     except Exception as e:
-                        print(f">> Unable to load {path}")
+                        logger.info(f"Unable to load {path}")
                         socketio.emit(
                             "error", {"message": f"Unable to load {path}: {str(e)}"}
                         )
@@ -736,9 +735,9 @@ class InvokeAIWebServer:
                         printable_parameters["init_mask"][:64] + "..."
                     )
 
-                print(f"\n>> Image Generation Parameters:\n\n{printable_parameters}\n")
-                print(f">> ESRGAN Parameters: {esrgan_parameters}")
-                print(f">> Facetool Parameters: {facetool_parameters}")
+                logger.info(f"Image Generation Parameters:\n\n{printable_parameters}\n")
+                logger.info(f"ESRGAN Parameters: {esrgan_parameters}")
+                logger.info(f"Facetool Parameters: {facetool_parameters}")
 
                 self.generate_images(
                     generation_parameters,
@@ -751,8 +750,8 @@ class InvokeAIWebServer:
         @socketio.on("runPostprocessing")
         def handle_run_postprocessing(original_image, postprocessing_parameters):
             try:
-                print(
-                    f'>> Postprocessing requested for "{original_image["url"]}": {postprocessing_parameters}'
+                logger.info(
+                    f'Postprocessing requested for "{original_image["url"]}": {postprocessing_parameters}'
                 )
 
                 progress = Progress()
@@ -862,14 +861,14 @@ class InvokeAIWebServer:
 
         @socketio.on("cancel")
         def handle_cancel():
-            print(">> Cancel processing requested")
+            logger.info("Cancel processing requested")
             self.canceled.set()
 
         # TODO: I think this needs a safety mechanism.
         @socketio.on("deleteImage")
         def handle_delete_image(url, thumbnail, uuid, category):
             try:
-                print(f'>> Delete requested "{url}"')
+                logger.info(f'Delete requested "{url}"')
                 from send2trash import send2trash
 
                 path = self.get_image_path_from_url(url)
@@ -1023,13 +1022,21 @@ class InvokeAIWebServer:
                     "RGB"
                 )
 
-            def image_progress(sample, step):
+            def image_progress(intermediate_state: PipelineIntermediateState):
                 if self.canceled.is_set():
                     raise CanceledException
 
                 nonlocal step_index
                 nonlocal generation_parameters
                 nonlocal progress
+
+                step = intermediate_state.step
+                if intermediate_state.predicted_original is not None:
+                    # Some schedulers report not only the noisy latents at the current timestep,
+                    # but also their estimate so far of what the de-noised latents will be.
+                    sample = intermediate_state.predicted_original
+                else:
+                    sample = intermediate_state.latents
 
                 generation_messages = {
                     "txt2img": "common.statusGeneratingTextToImage",
@@ -1256,7 +1263,7 @@ class InvokeAIWebServer:
                     image, os.path.basename(path), self.thumbnail_image_path
                 )
 
-                print(f'\n\n>> Image generated: "{path}"\n')
+                logger.info(f'Image generated: "{path}"\n')
                 self.write_log_message(f'[Generated] "{path}": {command}')
 
                 if progress.total_iterations > progress.current_iteration:
@@ -1270,13 +1277,14 @@ class InvokeAIWebServer:
                 eventlet.sleep(0)
 
                 parsed_prompt, _ = get_prompt_structure(generation_parameters["prompt"])
-                tokens = (
-                    None
-                    if type(parsed_prompt) is Blend
-                    else get_tokens_for_prompt_object(
-                        get_tokenizer(self.generate.model), parsed_prompt
+                with self.generate.model_context as model:
+                    tokens = (
+                        None
+                        if type(parsed_prompt) is Blend
+                        else get_tokens_for_prompt_object(
+                                model.tokenizer, parsed_prompt
+                        )
                     )
-                )
                 attention_maps_image_base64_url = (
                     None
                     if attention_maps_image is None
@@ -1303,16 +1311,9 @@ class InvokeAIWebServer:
 
                 progress.set_current_iteration(progress.current_iteration + 1)
 
-            def diffusers_step_callback_adapter(*cb_args, **kwargs):
-                if isinstance(cb_args[0], PipelineIntermediateState):
-                    progress_state: PipelineIntermediateState = cb_args[0]
-                    return image_progress(progress_state.latents, progress_state.step)
-                else:
-                    return image_progress(*cb_args, **kwargs)
-
             self.generate.prompt2image(
                 **generation_parameters,
-                step_callback=diffusers_step_callback_adapter,
+                step_callback=image_progress,
                 image_callback=image_done,
             )
 
@@ -1329,7 +1330,7 @@ class InvokeAIWebServer:
         except Exception as e:
             # Clear the CUDA cache on an exception
             self.empty_cuda_cache()
-            print(e)
+            logger.error(e)
             self.handle_exceptions(e)
 
     def empty_cuda_cache(self):

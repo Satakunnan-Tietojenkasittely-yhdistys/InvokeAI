@@ -5,33 +5,44 @@ from typing import Literal
 import cv2 as cv
 import numpy
 from PIL import Image, ImageOps
-from pydantic import Field
+from pydantic import BaseModel, Field
 
-from ..services.image_storage import ImageType
-from .baseinvocation import BaseInvocation, InvocationContext
-from .image import ImageField, ImageOutput
+from invokeai.app.models.image import ImageCategory, ImageField, ResourceOrigin
+from .baseinvocation import BaseInvocation, InvocationContext, InvocationConfig
+from .image import ImageOutput
 
 
-class CvInpaintInvocation(BaseInvocation):
+class CvInvocationConfig(BaseModel):
+    """Helper class to provide all OpenCV invocations with additional config"""
+
+    # Schema customisation
+    class Config(InvocationConfig):
+        schema_extra = {
+            "ui": {
+                "tags": ["cv", "image"],
+            },
+        }
+
+
+class CvInpaintInvocation(BaseInvocation, CvInvocationConfig):
     """Simple inpaint using opencv."""
-    #fmt: off
+
+    # fmt: off
     type: Literal["cv_inpaint"] = "cv_inpaint"
 
     # Inputs
     image: ImageField = Field(default=None, description="The image to inpaint")
     mask: ImageField = Field(default=None, description="The mask to use when inpainting")
-    #fmt: on
+    # fmt: on
 
     def invoke(self, context: InvocationContext) -> ImageOutput:
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
-        )
-        mask = context.services.images.get(self.mask.image_type, self.mask.image_name)
+        image = context.services.images.get_pil_image(self.image.image_name)
+        mask = context.services.images.get_pil_image(self.mask.image_name)
 
         # Convert to cv image/mask
         # TODO: consider making these utility functions
         cv_image = cv.cvtColor(numpy.array(image.convert("RGB")), cv.COLOR_RGB2BGR)
-        cv_mask = numpy.array(ImageOps.invert(mask))
+        cv_mask = numpy.array(ImageOps.invert(mask.convert("L")))
 
         # Inpaint
         cv_inpainted = cv.inpaint(cv_image, cv_mask, 3, cv.INPAINT_TELEA)
@@ -40,11 +51,17 @@ class CvInpaintInvocation(BaseInvocation):
         # TODO: consider making a utility function
         image_inpainted = Image.fromarray(cv.cvtColor(cv_inpainted, cv.COLOR_BGR2RGB))
 
-        image_type = ImageType.INTERMEDIATE
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        image_dto = context.services.images.create(
+            image=image_inpainted,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
         )
-        context.services.images.save(image_type, image_name, image_inpainted)
+
         return ImageOutput(
-            image=ImageField(image_type=image_type, image_name=image_name)
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
         )

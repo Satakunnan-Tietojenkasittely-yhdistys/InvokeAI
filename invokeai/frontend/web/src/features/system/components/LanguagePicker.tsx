@@ -1,67 +1,69 @@
-import type { ReactNode } from 'react';
-
-import { VStack } from '@chakra-ui/react';
-import IAIButton from 'common/components/IAIButton';
-import IAIIconButton from 'common/components/IAIIconButton';
-import IAIPopover from 'common/components/IAIPopover';
+import {
+  IconButton,
+  Menu,
+  MenuButton,
+  MenuItemOption,
+  MenuList,
+  MenuOptionGroup,
+  Tooltip,
+} from '@chakra-ui/react';
 import { useTranslation } from 'react-i18next';
-import { FaLanguage } from 'react-icons/fa';
+import i18n from 'i18n';
+import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
+import { languageSelector } from '../store/systemSelectors';
+import { languageChanged } from '../store/systemSlice';
+import { map } from 'lodash-es';
+import { IoLanguage } from 'react-icons/io5';
+
+export const LANGUAGES = {
+  ar: i18n.t('common.langArabic', { lng: 'ar' }),
+  nl: i18n.t('common.langDutch', { lng: 'nl' }),
+  en: i18n.t('common.langEnglish', { lng: 'en' }),
+  fr: i18n.t('common.langFrench', { lng: 'fr' }),
+  de: i18n.t('common.langGerman', { lng: 'de' }),
+  he: i18n.t('common.langHebrew', { lng: 'he' }),
+  it: i18n.t('common.langItalian', { lng: 'it' }),
+  ja: i18n.t('common.langJapanese', { lng: 'ja' }),
+  ko: i18n.t('common.langKorean', { lng: 'ko' }),
+  pl: i18n.t('common.langPolish', { lng: 'pl' }),
+  pt_BR: i18n.t('common.langBrPortuguese', { lng: 'pt_BR' }),
+  pt: i18n.t('common.langPortuguese', { lng: 'pt' }),
+  ru: i18n.t('common.langRussian', { lng: 'ru' }),
+  zh_CN: i18n.t('common.langSimplifiedChinese', { lng: 'zh_CN' }),
+  es: i18n.t('common.langSpanish', { lng: 'es' }),
+  uk: i18n.t('common.langUkranian', { lng: 'ua' }),
+};
 
 export default function LanguagePicker() {
-  const { t, i18n } = useTranslation();
-  const LANGUAGES = {
-    ar: t('common.langArabic', { lng: 'ar' }),
-    nl: t('common.langDutch', { lng: 'nl' }),
-    en: t('common.langEnglish', { lng: 'en' }),
-    fr: t('common.langFrench', { lng: 'fr' }),
-    de: t('common.langGerman', { lng: 'de' }),
-    it: t('common.langItalian', { lng: 'it' }),
-    ja: t('common.langJapanese', { lng: 'ja' }),
-    pl: t('common.langPolish', { lng: 'pl' }),
-    pt_Br: t('common.langBrPortuguese', { lng: 'pt_Br' }),
-    ru: t('common.langRussian', { lng: 'ru' }),
-    zh_Cn: t('common.langSimplifiedChinese', { lng: 'zh_Cn' }),
-    es: t('common.langSpanish', { lng: 'es' }),
-    uk: t('common.langUkranian', { lng: 'ua' }),
-  };
-
-  const renderLanguagePicker = () => {
-    const languagesToRender: ReactNode[] = [];
-    Object.keys(LANGUAGES).forEach((lang) => {
-      languagesToRender.push(
-        <IAIButton
-          key={lang}
-          data-selected={localStorage.getItem('i18nextLng') === lang}
-          onClick={() => i18n.changeLanguage(lang)}
-          className="modal-close-btn lang-select-btn"
-          aria-label={LANGUAGES[lang as keyof typeof LANGUAGES]}
-          size="sm"
-          minWidth="200px"
-        >
-          {LANGUAGES[lang as keyof typeof LANGUAGES]}
-        </IAIButton>
-      );
-    });
-
-    return languagesToRender;
-  };
+  const { t } = useTranslation();
+  const dispatch = useAppDispatch();
+  const language = useAppSelector(languageSelector);
 
   return (
-    <IAIPopover
-      trigger="hover"
-      triggerComponent={
-        <IAIIconButton
-          aria-label={t('common.languagePickerLabel')}
-          tooltip={t('common.languagePickerLabel')}
-          icon={<FaLanguage />}
-          size="sm"
+    <Menu closeOnSelect={false}>
+      <Tooltip label={t('common.languagePickerLabel')} hasArrow>
+        <MenuButton
+          as={IconButton}
+          icon={<IoLanguage />}
           variant="link"
-          data-variant="link"
-          fontSize={26}
+          aria-label={t('common.languagePickerLabel')}
+          fontSize={22}
+          minWidth={8}
         />
-      }
-    >
-      <VStack>{renderLanguagePicker()}</VStack>
-    </IAIPopover>
+      </Tooltip>
+      <MenuList>
+        <MenuOptionGroup value={language}>
+          {map(LANGUAGES, (languageName, l: keyof typeof LANGUAGES) => (
+            <MenuItemOption
+              key={l}
+              value={l}
+              onClick={() => dispatch(languageChanged(l))}
+            >
+              {languageName}
+            </MenuItemOption>
+          ))}
+        </MenuOptionGroup>
+      </MenuList>
+    </Menu>
   );
 }

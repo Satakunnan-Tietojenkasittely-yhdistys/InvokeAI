@@ -1,8 +1,8 @@
 import { ButtonGroup, Flex } from '@chakra-ui/react';
 import { createSelector } from '@reduxjs/toolkit';
-import { useAppDispatch, useAppSelector } from 'app/storeHooks';
+import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
 import IAIButton from 'common/components/IAIButton';
-import IAICheckbox from 'common/components/IAICheckbox';
+import IAISimpleCheckbox from 'common/components/IAISimpleCheckbox';
 import IAIColorPicker from 'common/components/IAIColorPicker';
 import IAIIconButton from 'common/components/IAIIconButton';
 import IAIPopover from 'common/components/IAIPopover';
@@ -18,7 +18,7 @@ import {
   setShouldPreserveMaskedArea,
 } from 'features/canvas/store/canvasSlice';
 import { rgbaColorToString } from 'features/canvas/util/colorToString';
-import { isEqual } from 'lodash';
+import { isEqual } from 'lodash-es';
 
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useTranslation } from 'react-i18next';
@@ -104,30 +104,25 @@ const IAICanvasMaskOptions = () => {
 
   return (
     <IAIPopover
-      trigger="hover"
       triggerComponent={
         <ButtonGroup>
           <IAIIconButton
             aria-label={t('unifiedCanvas.maskingOptions')}
             tooltip={t('unifiedCanvas.maskingOptions')}
             icon={<FaMask />}
-            style={
-              layer === 'mask'
-                ? { backgroundColor: 'var(--accent-color)' }
-                : { backgroundColor: 'var(--btn-base-color)' }
-            }
+            isChecked={layer === 'mask'}
             isDisabled={isStaging}
           />
         </ButtonGroup>
       }
     >
-      <Flex direction="column" gap="0.5rem">
-        <IAICheckbox
+      <Flex direction="column" gap={2}>
+        <IAISimpleCheckbox
           label={`${t('unifiedCanvas.enableMask')} (H)`}
           isChecked={isMaskEnabled}
           onChange={handleToggleEnableMask}
         />
-        <IAICheckbox
+        <IAISimpleCheckbox
           label={t('unifiedCanvas.preserveMaskedArea')}
           isChecked={shouldPreserveMaskedArea}
           onChange={(e) =>
@@ -135,8 +130,8 @@ const IAICanvasMaskOptions = () => {
           }
         />
         <IAIColorPicker
-          style={{ paddingTop: '0.5rem', paddingBottom: '0.5rem' }}
-          color={maskColor}
+          sx={{ paddingTop: 2, paddingBottom: 2 }}
+          pickerColor={maskColor}
           onChange={(newColor) => dispatch(setMaskColor(newColor))}
         />
         <IAIButton size="sm" leftIcon={<FaTrash />} onClick={handleClearMask}>

@@ -1,17 +1,18 @@
-import { ImageUploaderTriggerContext } from 'app/contexts/ImageUploaderTriggerContext';
-import { useContext } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FaUpload } from 'react-icons/fa';
 import IAIIconButton from './IAIIconButton';
+import useImageUploader from 'common/hooks/useImageUploader';
 
 const ImageUploaderIconButton = () => {
-  const openImageUploader = useContext(ImageUploaderTriggerContext);
+  const { t } = useTranslation();
+  const { openUploader } = useImageUploader();
 
   return (
     <IAIIconButton
-      aria-label="Upload Image"
+      aria-label={t('accessibility.uploadImage')}
       tooltip="Upload Image"
       icon={<FaUpload />}
-      onClick={openImageUploader || undefined}
+      onClick={openUploader}
     />
   );
 };

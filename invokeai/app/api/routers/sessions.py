@@ -2,14 +2,14 @@
 
 from typing import Annotated, List, Optional, Union
 
-from fastapi import Body, Path, Query
-from fastapi.responses import Response
+from fastapi import Body, HTTPException, Path, Query, Response
 from fastapi.routing import APIRouter
 from pydantic.fields import Field
 
 from ...invocations import *
 from ...invocations.baseinvocation import BaseInvocation
 from ...services.graph import (
+    Edge,
     EdgeConnection,
     Graph,
     GraphExecutionState,
@@ -50,7 +50,7 @@ async def list_sessions(
     query: str = Query(default="", description="The query string to search for"),
 ) -> PaginatedResults[GraphExecutionState]:
     """Gets a list of sessions, optionally searching"""
-    if filter == "":
+    if query == "":
         result = ApiDependencies.invoker.services.graph_execution_manager.list(
             page, per_page
         )
@@ -75,7 +75,7 @@ async def get_session(
     """Gets a session"""
     session = ApiDependencies.invoker.services.graph_execution_manager.get(session_id)
     if session is None:
-        return Response(status_code=404)
+        raise HTTPException(status_code=404)
     else:
         return session
 
@@ -92,13 +92,13 @@ async def get_session(
 async def add_node(
     session_id: str = Path(description="The id of the session"),
     node: Annotated[
-        Union[BaseInvocation.get_invocations()], Field(discriminator="type")
+        Union[BaseInvocation.get_invocations()], Field(discriminator="type") # type: ignore
     ] = Body(description="The node to add"),
 ) -> str:
     """Adds a node to the graph"""
     session = ApiDependencies.invoker.services.graph_execution_manager.get(session_id)
     if session is None:
-        return Response(status_code=404)
+        raise HTTPException(status_code=404)
 
     try:
         session.add_node(node)
@@ -107,9 +107,9 @@ async def add_node(
         )  # TODO: can this be done automatically, or add node through an API?
         return session.id
     except NodeAlreadyExecutedError:
-        return Response(status_code=400)
+        raise HTTPException(status_code=400)
     except IndexError:
-        return Response(status_code=400)
+        raise HTTPException(status_code=400)
 
 
 @session_router.put(
@@ -125,13 +125,13 @@ async def update_node(
     session_id: str = Path(description="The id of the session"),
     node_path: str = Path(description="The path to the node in the graph"),
     node: Annotated[
-        Union[BaseInvocation.get_invocations()], Field(discriminator="type")
+        Union[BaseInvocation.get_invocations()], Field(discriminator="type") # type: ignore
     ] = Body(description="The new node"),
 ) -> GraphExecutionState:
     """Updates a node in the graph and removes all linked edges"""
     session = ApiDependencies.invoker.services.graph_execution_manager.get(session_id)
     if session is None:
-        return Response(status_code=404)
+        raise HTTPException(status_code=404)
 
     try:
         session.update_node(node_path, node)
@@ -140,9 +140,9 @@ async def update_node(
         )  # TODO: can this be done automatically, or add node through an API?
         return session
     except NodeAlreadyExecutedError:
-        return Response(status_code=400)
+        raise HTTPException(status_code=400)
     except IndexError:
-        return Response(status_code=400)
+        raise HTTPException(status_code=400)
 
 
 @session_router.delete(
@@ -161,7 +161,7 @@ async def delete_node(
     """Deletes a node in the graph and removes all linked edges"""
     session = ApiDependencies.invoker.services.graph_execution_manager.get(session_id)
     if session is None:
-        return Response(status_code=404)
+        raise HTTPException(status_code=404)
 
     try:
         session.delete_node(node_path)
@@ -170,9 +170,9 @@ async def delete_node(
         )  # TODO: can this be done automatically, or add node through an API?
         return session
     except NodeAlreadyExecutedError:
-        return Response(status_code=400)
+        raise HTTPException(status_code=400)
     except IndexError:
-        return Response(status_code=400)
+        raise HTTPException(status_code=400)
 
 
 @session_router.post(
@@ -186,12 +186,12 @@ async def delete_node(
 )
 async def add_edge(
     session_id: str = Path(description="The id of the session"),
-    edge: tuple[EdgeConnection, EdgeConnection] = Body(description="The edge to add"),
+    edge: Edge = Body(description="The edge to add"),
 ) -> GraphExecutionState:
     """Adds an edge to the graph"""
     session = ApiDependencies.invoker.services.graph_execution_manager.get(session_id)
     if session is None:
-        return Response(status_code=404)
+        raise HTTPException(status_code=404)
 
     try:
         session.add_edge(edge)
@@ -200,9 +200,9 @@ async def add_edge(
         )  # TODO: can this be done automatically, or add node through an API?
         return session
     except NodeAlreadyExecutedError:
-        return Response(status_code=400)
+        raise HTTPException(status_code=400)
     except IndexError:
-        return Response(status_code=400)
+        raise HTTPException(status_code=400)
 
 
 # TODO: the edge being in the path here is really ugly, find a better solution
@@ -225,12 +225,12 @@ async def delete_edge(
     """Deletes an edge from the graph"""
     session = ApiDependencies.invoker.services.graph_execution_manager.get(session_id)
     if session is None:
-        return Response(status_code=404)
+        raise HTTPException(status_code=404)
 
     try:
-        edge = (
-            EdgeConnection(node_id=from_node_id, field=from_field),
-            EdgeConnection(node_id=to_node_id, field=to_field),
+        edge = Edge(
+            source=EdgeConnection(node_id=from_node_id, field=from_field),
+            destination=EdgeConnection(node_id=to_node_id, field=to_field)
         )
         session.delete_edge(edge)
         ApiDependencies.invoker.services.graph_execution_manager.set(
@@ -238,9 +238,9 @@ async def delete_edge(
         )  # TODO: can this be done automatically, or add node through an API?
         return session
     except NodeAlreadyExecutedError:
-        return Response(status_code=400)
+        raise HTTPException(status_code=400)
     except IndexError:
-        return Response(status_code=400)
+        raise HTTPException(status_code=400)
 
 
 @session_router.put(
@@ -258,14 +258,29 @@ async def invoke_session(
     all: bool = Query(
         default=False, description="Whether or not to invoke all remaining invocations"
     ),
-) -> None:
+) -> Response:
     """Invokes a session"""
     session = ApiDependencies.invoker.services.graph_execution_manager.get(session_id)
     if session is None:
-        return Response(status_code=404)
+        raise HTTPException(status_code=404)
 
     if session.is_complete():
-        return Response(status_code=400)
+        raise HTTPException(status_code=400)
 
     ApiDependencies.invoker.invoke(session, invoke_all=all)
+    return Response(status_code=202)
+
+
+@session_router.delete(
+    "/{session_id}/invoke",
+    operation_id="cancel_session_invoke",
+    responses={
+        202: {"description": "The invocation is canceled"}
+    },
+)
+async def cancel_session_invoke(
+    session_id: str = Path(description="The id of the session to cancel"),
+) -> Response:
+    """Invokes a session"""
+    ApiDependencies.invoker.cancel(session_id)
     return Response(status_code=202)
